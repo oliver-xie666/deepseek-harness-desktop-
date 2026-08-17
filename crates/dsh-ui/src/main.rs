@@ -45,6 +45,14 @@ fn main() {
         args.mock
     );
 
+    // Initialize dedicated background Tokio Multi-Thread Runtime for Daemon & WebSocket IPC
+    let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to initialize background Tokio runtime");
+
+    let _tokio_guard = tokio_runtime.enter();
+
     let port = args
         .port
         .or_else(|| DaemonManager::find_available_port(3000, 3100).ok())
@@ -59,8 +67,8 @@ fn main() {
     let (app_state, outbox_rx) = AppState::new(daemon_config);
     let app_state_clone = app_state.clone();
 
-    // Start background runtime & WebSocket worker
-    tokio::spawn(async move {
+    // Start background runtime & WebSocket worker inside Tokio runtime
+    tokio_runtime.spawn(async move {
         if let Err(e) = app_state_clone.daemon_manager.start().await {
             tracing::warn!("Failed to start daemon manager: {}", e);
         }
@@ -68,6 +76,7 @@ fn main() {
 
     let _ws_client = AppState::start_background_client(app_state.clone(), outbox_rx);
 
+    // Start GPUI foreground application loop
     application().run(move |cx: &mut App| {
         let bounds = Bounds::centered(None, size(px(1280.0), px(800.0)), cx);
         let state_for_window = app_state.clone();
