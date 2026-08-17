@@ -1,4 +1,5 @@
 use crate::details_drawer::DetailsDrawer;
+use crate::dropdown::{ModelModeSelector, WorkspaceSelector};
 use crate::text_input::TextInput;
 use dsh_core::AppState;
 use dsh_markdown::{CodeHighlighter, InlineSpan, MarkdownBlock, StreamingMarkdownParser, TokenType};
@@ -9,24 +10,28 @@ pub struct ChatView {
     pub state: Entity<Arc<AppState>>,
     pub details_drawer: Entity<DetailsDrawer>,
     pub text_input: Entity<TextInput>,
+    pub workspace_selector: Entity<WorkspaceSelector>,
+    pub model_selector: Entity<ModelModeSelector>,
     pub has_messages: bool,
     pub active_prompt: String,
     pub streaming_text: String,
-    pub workspace_name: String,
 }
 
 impl ChatView {
     pub fn new(state: Entity<Arc<AppState>>, details_drawer: Entity<DetailsDrawer>, cx: &mut Context<Self>) -> Self {
         let text_input = cx.new(|cx| TextInput::new("选择一个工作区开始", cx));
+        let workspace_selector = cx.new(|_| WorkspaceSelector::new());
+        let model_selector = cx.new(|_| ModelModeSelector::new());
 
         Self {
             state,
             details_drawer,
             text_input,
+            workspace_selector,
+            model_selector,
             has_messages: false,
             active_prompt: String::new(),
             streaming_text: String::new(),
-            workspace_name: "选择工作区".into(),
         }
     }
 
@@ -192,7 +197,7 @@ impl ChatView {
         }
     }
 
-    fn render_empty_state(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_empty_state(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let handle_submit = cx.listener(|this, _, _, cx| {
             this.submit_current_input(cx);
         });
@@ -246,32 +251,8 @@ impl ChatView {
                             .items_center()
                             .gap_3()
                             .px_1()
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_1p5()
-                                    .cursor_pointer()
-                                    .text_xs()
-                                    .text_color(rgb(0x979da6))
-                                    .hover(|s| s.text_color(rgb(0xffffff)))
-                                    .child("📁")
-                                    .child("选择工作区")
-                                    .child("∨"),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_1p5()
-                                    .cursor_pointer()
-                                    .text_xs()
-                                    .text_color(rgb(0x979da6))
-                                    .hover(|s| s.text_color(rgb(0xffffff)))
-                                    .child("Ꮬ")
-                                    .child("标准模式")
-                                    .child("∨"),
-                            ),
+                            .child(self.workspace_selector.clone())
+                            .child(self.model_selector.clone()),
                     )
                     // Big Composer Box
                     .child(
@@ -415,7 +396,7 @@ impl ChatView {
 }
 
 impl Render for ChatView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let has_messages = self.has_messages;
         let handle_submit = cx.listener(|this, _, _, cx| {
             this.submit_current_input(cx);
@@ -434,7 +415,7 @@ impl Render for ChatView {
                 if has_messages {
                     self.render_active_messages(cx).into_any_element()
                 } else {
-                    self.render_empty_state(cx).into_any_element()
+                    self.render_empty_state(window, cx).into_any_element()
                 }
             )
             // Floating Bottom Composer Dock (When active in conversation)
