@@ -5,22 +5,54 @@ mod sidebar;
 mod title_bar;
 mod workspace;
 
+use clap::Parser;
 use dsh_common::init_logging;
 use dsh_core::AppState;
 use dsh_daemon::{DaemonConfig, DaemonManager};
 use gpui::{App, AppContext, Bounds, WindowBounds, WindowOptions, px, size};
 use gpui_platform::application;
+use std::path::PathBuf;
 use tracing::info;
 use workspace::WorkspaceView;
 
-fn main() {
-    init_logging();
-    info!("Starting DeepSeek Harness Desktop (Rust + GPUI)...");
+#[derive(Parser, Debug)]
+#[command(name = "dsh-desktop", version = "0.1.0", about = "DeepSeek Harness Native Desktop Workspace")]
+struct CliArgs {
+    /// Workspace root directory path
+    #[arg(default_value = ".")]
+    workspace: PathBuf,
 
-    let port = DaemonManager::find_available_port(3000, 3100).unwrap_or(3000);
+    /// Explicit port for DeepSeek Harness daemon
+    #[arg(short, long)]
+    port: Option<u16>,
+
+    /// Run with embedded mock daemon (no live LLM key required)
+    #[arg(long, default_value_t = true)]
+    mock: bool,
+
+    /// Default model name
+    #[arg(short, long)]
+    model: Option<String>,
+}
+
+fn main() {
+    let args = CliArgs::parse();
+    init_logging();
+
+    info!(
+        "Starting DeepSeek Harness Desktop (workspace: {}, mock: {})...",
+        args.workspace.display(),
+        args.mock
+    );
+
+    let port = args
+        .port
+        .or_else(|| DaemonManager::find_available_port(3000, 3100).ok())
+        .unwrap_or(3000);
+
     let daemon_config = DaemonConfig {
         port,
-        use_embedded_mock: true,
+        use_embedded_mock: args.mock,
         ..Default::default()
     };
 

@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build Release Asset (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: dsh-desktop.exe
+            asset_name: deepseek-harness-desktop-windows-x64.zip
+          - os: macos-latest
+            artifact_name: dsh-desktop
+            asset_name: deepseek-harness-desktop-macos-x64.tar.gz
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Install Rust Toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Build Release Binary
+      run: cargo build --release -p dsh-ui
+
+    - name: Package Windows
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path dist/deepseek-harness-desktop
+        Copy-Item target/release/dsh-desktop.exe dist/deepseek-harness-desktop/
+        Copy-Item README.md dist/deepseek-harness-desktop/
+        Compress-Archive -Path dist/deepseek-harness-desktop/* -DestinationPath ${{ matrix.asset_name }}
+
+    - name: Package macOS
+      if: matrix.os == 'macos-latest'
+      run: |
+        mkdir -p dist/deepseek-harness-desktop
+        cp target/release/dsh-desktop dist/deepseek-harness-desktop/
+        cp README.md dist/deepseek-harness-desktop/
+        tar -czf ${{ matrix.asset_name }} -C dist/deepseek-harness-desktop .
+
+    - name: Upload Release Asset
+      uses: softprops/action-gh-release@v2
+      with:
+        files: ${{ matrix.asset_name }}
+        draft: false
+        prerelease: false
