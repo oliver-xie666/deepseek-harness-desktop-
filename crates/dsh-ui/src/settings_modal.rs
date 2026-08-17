@@ -32,17 +32,24 @@ impl SettingsModal {
         }
     }
 
-    pub fn toggle(&mut self) {
+    pub fn toggle(&mut self, cx: &mut Context<Self>) {
         self.is_open = !self.is_open;
+        cx.notify();
     }
 
-    pub fn set_tab(&mut self, tab: SettingsTab) {
+    pub fn set_tab(&mut self, tab: SettingsTab, cx: &mut Context<Self>) {
         self.active_tab = tab;
+        cx.notify();
+    }
+
+    pub fn close(&mut self, cx: &mut Context<Self>) {
+        self.is_open = false;
+        cx.notify();
     }
 }
 
 impl Render for SettingsModal {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.is_open {
             return div();
         }
@@ -50,6 +57,22 @@ impl Render for SettingsModal {
         let is_models = self.active_tab == SettingsTab::Models;
         let is_mcp = self.active_tab == SettingsTab::Mcp;
         let is_general = self.active_tab == SettingsTab::General;
+
+        let handle_tab_models = cx.listener(|this, _, _, cx| {
+            this.set_tab(SettingsTab::Models, cx);
+        });
+        let handle_tab_mcp = cx.listener(|this, _, _, cx| {
+            this.set_tab(SettingsTab::Mcp, cx);
+        });
+        let handle_tab_general = cx.listener(|this, _, _, cx| {
+            this.set_tab(SettingsTab::General, cx);
+        });
+        let handle_close = cx.listener(|this, _, _, cx| {
+            this.close(cx);
+        });
+        let handle_save = cx.listener(|this, _, _, cx| {
+            this.close(cx);
+        });
 
         div()
             .absolute()
@@ -104,9 +127,7 @@ impl Render for SettingsModal {
                                     .text_color(rgb(0x979da6))
                                     .hover(|s| s.bg(rgb(0x23262d)).text_color(rgb(0xffffff)))
                                     .cursor_pointer()
-                                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
-                                        cx.stop_propagation();
-                                    })
+                                    .on_mouse_down(gpui::MouseButton::Left, handle_close)
                                     .child("✕"),
                             ),
                     )
@@ -128,6 +149,7 @@ impl Render for SettingsModal {
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(if is_models { rgb(0x4176e6) } else { rgb(0x979da6) })
                                     .cursor_pointer()
+                                    .on_mouse_down(gpui::MouseButton::Left, handle_tab_models)
                                     .child("🤖 Models & API"),
                             )
                             .child(
@@ -139,6 +161,7 @@ impl Render for SettingsModal {
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(if is_mcp { rgb(0x4176e6) } else { rgb(0x979da6) })
                                     .cursor_pointer()
+                                    .on_mouse_down(gpui::MouseButton::Left, handle_tab_mcp)
                                     .child("🔌 MCP Servers"),
                             )
                             .child(
@@ -150,6 +173,7 @@ impl Render for SettingsModal {
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(if is_general { rgb(0x4176e6) } else { rgb(0x979da6) })
                                     .cursor_pointer()
+                                    .on_mouse_down(gpui::MouseButton::Left, handle_tab_general)
                                     .child("🎨 General"),
                             ),
                     )
@@ -234,9 +258,7 @@ impl Render for SettingsModal {
                                     .font_weight(FontWeight::BOLD)
                                     .text_color(rgb(0xffffff))
                                     .cursor_pointer()
-                                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
-                                        cx.stop_propagation();
-                                    })
+                                    .on_mouse_down(gpui::MouseButton::Left, handle_save)
                                     .child("Save & Apply"),
                             ),
                     ),

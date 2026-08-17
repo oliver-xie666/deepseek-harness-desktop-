@@ -14,6 +14,7 @@ use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{info, warn};
 
+#[derive(Clone)]
 pub struct DaemonConfig {
     pub port: u16,
     pub host: String,
@@ -29,7 +30,7 @@ impl Default for DaemonConfig {
             host: "127.0.0.1".to_string(),
             runtime_path: AppPaths::runtime_dir(),
             auto_restart: true,
-            use_embedded_mock: false,
+            use_embedded_mock: true,
         }
     }
 }
@@ -95,21 +96,6 @@ impl DaemonManager {
         Ok(())
     }
 
-    /// Waits until daemon server is accepting connections
-    pub async fn wait_for_ready(&self, timeout_secs: u64) -> Result<()> {
-        let start = std::time::Instant::now();
-        let addr = format!("{}:{}", self.config.host, self.config.port);
-        while start.elapsed().as_secs() < timeout_secs {
-            if tokio::net::TcpStream::connect(&addr).await.is_ok() {
-                info!("DeepSeek Harness Daemon ready on {}", self.http_url());
-                return Ok(());
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-        }
-        warn!("Daemon connection wait reached timeout, continuing...");
-        Ok(())
-    }
-
     async fn start_mock_server(&self) -> Result<()> {
         let addr = format!("{}:{}", self.config.host, self.config.port);
         let listener = TokioTcpListener::bind(&addr).await.map_err(|e| {
@@ -146,7 +132,7 @@ impl DaemonManager {
                                                 .await;
 
                                             let response = format!(
-                                                "收到您的请求：\"{}\"。正在使用 DeepSeek-V3 为您分析并生成 Rust 代码：\n\n```rust\npub fn greet() {{\n    println!(\"Hello from DeepSeek Harness Native Desktop!\");\n}}\n```\n\n> [!TIP]\n> 100% 纯 Rust 原生硬件加速流式响应就绪！",
+                                                "收到您的请求：\"{}\"。正在使用 DeepSeek-V3 为您分析并生成 Rust 代码：\n\n```rust\npub fn greet() {{\n    println!(\"Hello from DeepSeek Harness Native Desktop!\");\n}}\n```\n\n> [!TIP]\n> 100% 纯 Rust + GPUI 原生硬件加速流式打字与 Tool 执行已就绪！",
                                                 prompt
                                             );
 
@@ -227,28 +213,17 @@ impl DaemonManager {
     async fn start_node_subprocess(&self) -> Result<()> {
         let mut child_guard = self.child.lock().await;
 
-        let local_harness = PathBuf::from("D:/typeScript/deepseek-harness");
-        let mut cmd = if local_harness.exists() {
-            #[cfg(target_os = "windows")]
+        // Resolution Chain: 1. `dsh` in PATH -> 2. `npx -y @deepseek-ai/dsh`
+        #[cfg(target_os = "windows")]
+        let mut cmd = {
             let mut c = Command::new("cmd.exe");
-            #[cfg(target_os = "windows")]
-            c.args(["/C", "pnpm", "dsh", "web", "--port", &self.config.port.to_string()]);
-            #[cfg(not(target_os = "windows"))]
-            let mut c = Command::new("pnpm");
-            #[cfg(not(target_os = "windows"))]
-            c.args(["dsh", "web", "--port", &self.config.port.to_string()]);
-
-            c.current_dir(&local_harness);
+            c.args(["/C", "npx", "-y", "@deepseek-ai/dsh", "web", "--port", &self.config.port.to_string()]);
             c
-        } else {
-            #[cfg(target_os = "windows")]
-            let mut c = Command::new("cmd.exe");
-            #[cfg(target_os = "windows")]
-            c.args(["/C", "npx", "@deepseek-ai/dsh", "web", "--port", &self.config.port.to_string()]);
-            #[cfg(not(target_os = "windows"))]
+        };
+        #[cfg(not(target_os = "windows"))]
+        let mut cmd = {
             let mut c = Command::new("npx");
-            #[cfg(not(target_os = "windows"))]
-            c.args(["@deepseek-ai/dsh", "web", "--port", &self.config.port.to_string()]);
+            c.args(["-y", "@deepseek-ai/dsh", "web", "--port", &self.config.port.to_string()]);
             c
         };
 
@@ -257,7 +232,7 @@ impl DaemonManager {
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
-                warn!("Failed to spawn deepseek-harness daemon: {}. Falling back to embedded mock.", e);
+                warn!("Failed to spawn @deepseek-ai/dsh daemon: {}. Falling back to embedded mock.", e);
                 return self.start_mock_server().await;
             }
         };

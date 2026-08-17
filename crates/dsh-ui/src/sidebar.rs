@@ -52,6 +52,29 @@ impl Sidebar {
         }
     }
 
+    pub fn select_session(&mut self, id: &str, cx: &mut Context<Self>) {
+        for sess in &mut self.sessions {
+            sess.is_active = sess.id == id;
+        }
+        cx.notify();
+    }
+
+    pub fn add_new_session(&mut self, cx: &mut Context<Self>) {
+        for sess in &mut self.sessions {
+            sess.is_active = false;
+        }
+        let new_id = (self.sessions.len() + 1).to_string();
+        self.sessions.insert(
+            0,
+            SessionItemView {
+                id: new_id,
+                title: "💬 New Session".into(),
+                is_active: true,
+            },
+        );
+        cx.notify();
+    }
+
     fn render_file_node(&self, node: &FileNode, depth: usize) -> impl IntoElement {
         let indent = depth * 12;
         let icon = node.icon.clone();
@@ -86,7 +109,11 @@ impl Sidebar {
 }
 
 impl Render for Sidebar {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let handle_new_chat = cx.listener(|this, _, _, cx| {
+            this.add_new_session(cx);
+        });
+
         let file_nodes: Vec<_> = self
             .file_tree
             .as_ref()
@@ -126,9 +153,7 @@ impl Render for Sidebar {
                     .font_weight(FontWeight::BOLD)
                     .text_color(rgb(0xffffff))
                     .cursor_pointer()
-                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
-                        cx.stop_propagation();
-                    })
+                    .on_mouse_down(gpui::MouseButton::Left, handle_new_chat)
                     .child("💬 + New Session"),
             )
             // Section 1: Workspaces & File Explorer
@@ -180,6 +205,10 @@ impl Render for Sidebar {
                         let is_act = sess.is_active;
                         let bg = if is_act { rgb(0x1f2228) } else { rgb(0x15171b) };
                         let fg = if is_act { rgb(0xffffff) } else { rgb(0x979da6) };
+                        let sess_id = sess.id.clone();
+                        let handle_click = cx.listener(move |this, _, _, cx| {
+                            this.select_session(&sess_id, cx);
+                        });
 
                         div()
                             .flex()
@@ -191,6 +220,7 @@ impl Render for Sidebar {
                             .bg(bg)
                             .hover(|s| s.bg(rgb(0x1f2228)))
                             .cursor_pointer()
+                            .on_mouse_down(gpui::MouseButton::Left, handle_click)
                             .child(
                                 div()
                                     .flex()

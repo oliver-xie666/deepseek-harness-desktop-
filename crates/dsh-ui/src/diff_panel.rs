@@ -55,21 +55,59 @@ impl DiffPanel {
                 },
             ],
             terminal_logs: vec![
-                "[dsh-daemon] Spawning node daemon on ws://127.0.0.1:3000...".into(),
+                "[dsh-daemon] Spawning node daemon on ws://127.0.0.1:3080...".into(),
                 "[dsh-core] Handshake with deepseek-harness successful.".into(),
                 "[dsh-ui] 120 FPS DirectX Engine online. Ready.".into(),
             ],
         }
     }
 
-    pub fn set_tab(&mut self, tab: DetailsTab) {
+    pub fn set_tab(&mut self, tab: DetailsTab, cx: &mut Context<Self>) {
         self.active_tab = tab;
+        cx.notify();
+    }
+
+    pub fn accept_diff(&mut self, cx: &mut Context<Self>) {
+        self.terminal_logs.push(format!("[diff] Accepted changes for {}", self.current_file));
+        self.lines = vec![
+            DiffLineView {
+                line_type: DiffLineType::Unchanged,
+                content: " pub struct DaemonManager {".into(),
+            },
+            DiffLineView {
+                line_type: DiffLineType::Unchanged,
+                content: "     pub config: DaemonConfig,".into(),
+            },
+            DiffLineView {
+                line_type: DiffLineType::Unchanged,
+                content: "     pub child: Arc<Mutex<Option<Child>>>, ".into(),
+            },
+        ];
+        cx.notify();
+    }
+
+    pub fn reject_diff(&mut self, cx: &mut Context<Self>) {
+        self.terminal_logs.push(format!("[diff] Rejected changes for {}", self.current_file));
+        cx.notify();
     }
 }
 
 impl Render for DiffPanel {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_diff = self.active_tab == DetailsTab::Diff;
+
+        let handle_tab_diff = cx.listener(|this, _, _, cx| {
+            this.set_tab(DetailsTab::Diff, cx);
+        });
+        let handle_tab_term = cx.listener(|this, _, _, cx| {
+            this.set_tab(DetailsTab::Terminal, cx);
+        });
+        let handle_accept = cx.listener(|this, _, _, cx| {
+            this.accept_diff(cx);
+        });
+        let handle_reject = cx.listener(|this, _, _, cx| {
+            this.reject_diff(cx);
+        });
 
         div()
             .w_96()
@@ -105,6 +143,7 @@ impl Render for DiffPanel {
                                     .font_weight(if is_diff { FontWeight::BOLD } else { FontWeight::NORMAL })
                                     .text_color(if is_diff { rgb(0x4176e6) } else { rgb(0x979da6) })
                                     .cursor_pointer()
+                                    .on_mouse_down(gpui::MouseButton::Left, handle_tab_diff)
                                     .child("📑 Diff Review"),
                             )
                             .child(
@@ -117,6 +156,7 @@ impl Render for DiffPanel {
                                     .font_weight(if !is_diff { FontWeight::BOLD } else { FontWeight::NORMAL })
                                     .text_color(if !is_diff { rgb(0x4176e6) } else { rgb(0x979da6) })
                                     .cursor_pointer()
+                                    .on_mouse_down(gpui::MouseButton::Left, handle_tab_term)
                                     .child("💻 Terminal"),
                             ),
                     )
@@ -135,9 +175,7 @@ impl Render for DiffPanel {
                                     .text_xs()
                                     .text_color(rgb(0xffffff))
                                     .cursor_pointer()
-                                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
-                                        cx.stop_propagation();
-                                    })
+                                    .on_mouse_down(gpui::MouseButton::Left, handle_accept)
                                     .child("✓ Accept"),
                             )
                             .child(
@@ -150,9 +188,7 @@ impl Render for DiffPanel {
                                     .text_xs()
                                     .text_color(rgb(0xffffff))
                                     .cursor_pointer()
-                                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
-                                        cx.stop_propagation();
-                                    })
+                                    .on_mouse_down(gpui::MouseButton::Left, handle_reject)
                                     .child("✕ Reject"),
                             ),
                     ),

@@ -4,7 +4,6 @@ pub struct TitleBar {
     pub workspace_name: String,
     pub active_model: String,
     pub is_connected: bool,
-    pub on_toggle_settings: Option<Box<dyn Fn(&mut Window, &mut Context<Self>) + 'static>>,
 }
 
 impl TitleBar {
@@ -13,7 +12,6 @@ impl TitleBar {
             workspace_name: workspace.to_string(),
             active_model: model.to_string(),
             is_connected,
-            on_toggle_settings: None,
         }
     }
 }
@@ -42,11 +40,7 @@ impl Render for TitleBar {
                     .flex()
                     .items_center()
                     .gap_2p5()
-                    .child(
-                        div()
-                            .text_base()
-                            .child("🐳"),
-                    )
+                    .child(div().text_base().child("🐳"))
                     .child(
                         div()
                             .text_sm()
@@ -54,12 +48,7 @@ impl Render for TitleBar {
                             .text_color(rgb(0x4176e6))
                             .child("DeepSeek Harness"),
                     )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(rgb(0x61666b))
-                            .child("/"),
-                    )
+                    .child(div().text_xs().text_color(rgb(0x61666b)).child("/"))
                     .child(
                         div()
                             .text_xs()
@@ -77,7 +66,7 @@ impl Render for TitleBar {
                         window.start_window_move();
                     }),
             )
-            // Right: Status, Model, Settings & Window Controls
+            // Right: Model, Status & Window Controls
             .child(
                 div()
                     .flex()
@@ -111,24 +100,6 @@ impl Render for TitleBar {
                             .text_color(rgb(0x979da6))
                             .child(div().size_2().rounded_full().bg(status_color))
                             .child(if self.is_connected { "Online" } else { "Disconnected" }),
-                    )
-                    // Settings Button
-                    .child(
-                        div()
-                            .px_2p5()
-                            .py_1()
-                            .rounded_md()
-                            .bg(rgb(0x1f2228))
-                            .hover(|s| s.bg(rgb(0x282c34)))
-                            .border_1()
-                            .border_color(rgb(0x2c2c2e))
-                            .text_xs()
-                            .text_color(rgb(0xe4e4e7))
-                            .cursor_pointer()
-                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
-                                cx.stop_propagation();
-                            })
-                            .child("⚙️ Settings"),
                     )
                     // Divider
                     .child(div().w_px().h_4().bg(rgb(0x2c2c2e)))

@@ -5,28 +5,36 @@ use std::sync::Arc;
 
 pub struct ChatView {
     pub state: Entity<Arc<AppState>>,
-    pub prompt_draft: String,
-    pub active_preset_sent: bool,
+    pub has_messages: bool,
+    pub active_prompt: String,
+    pub streaming_text: String,
 }
 
 impl ChatView {
     pub fn new(state: Entity<Arc<AppState>>, _cx: &mut Context<Self>) -> Self {
         Self {
             state,
-            prompt_draft: String::new(),
-            active_preset_sent: false,
+            has_messages: false,
+            active_prompt: String::new(),
+            streaming_text: String::new(),
         }
     }
 
-    pub fn send_text(&mut self, text: String, cx: &mut Context<Self>) {
-        if text.trim().is_empty() {
-            return;
-        }
+    pub fn reset(&mut self, cx: &mut Context<Self>) {
+        self.has_messages = false;
+        self.active_prompt.clear();
+        self.streaming_text.clear();
+        cx.notify();
+    }
+
+    pub fn send_prompt(&mut self, prompt: &str, cx: &mut Context<Self>) {
+        self.has_messages = true;
+        self.active_prompt = prompt.to_string();
+        self.streaming_text = "已成功连接 DeepSeek-V3 智能体！正在分析上下文并为您实时生成：\n\n```rust\npub async fn run_agent_task() {\n    println!(\"DeepSeek Harness 120 FPS DirectX Engine Online!\");\n}\n```\n\n> [!TIP]\n> 100% 纯 Rust + GPUI 原生 GPU 硬件加速渲染就绪。".to_string();
+        cx.notify();
 
         let state_arc = self.state.read(cx).clone();
-        self.prompt_draft.clear();
-        self.active_preset_sent = true;
-        cx.notify();
+        let prompt_owned = prompt.to_string();
 
         tokio::spawn(async move {
             let session_id = {
@@ -36,7 +44,7 @@ impl ChatView {
                     None => state_arc.create_session("New Chat", ".").await,
                 }
             };
-            let _ = state_arc.add_user_message(&session_id, &text).await;
+            let _ = state_arc.add_user_message(&session_id, &prompt_owned).await;
         });
     }
 
@@ -160,7 +168,17 @@ impl ChatView {
         }
     }
 
-    fn render_empty_state(&self) -> impl IntoElement {
+    fn render_empty_state(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let handle_card1 = cx.listener(|this, _, _, cx| {
+            this.send_prompt("请帮我探索当前代码库架构与核心模块划分", cx);
+        });
+        let handle_card2 = cx.listener(|this, _, _, cx| {
+            this.send_prompt("请帮我重构 WebSocket 自动重连与指数退避逻辑", cx);
+        });
+        let handle_card3 = cx.listener(|this, _, _, cx| {
+            this.send_prompt("请审查当前 Git Diff 变更并自动生成测试用例", cx);
+        });
+
         div()
             .flex_1()
             .flex()
@@ -202,7 +220,7 @@ impl ChatView {
                             .child("DeepSeek-V3 & DeepSeek-R1 powered Native Coding Agent"),
                     ),
             )
-            // Quick Action Suggestion Cards
+            // Quick Action Suggestion Cards (Interactive Click Handlers)
             .child(
                 div()
                     .flex()
@@ -219,6 +237,7 @@ impl ChatView {
                             .border_color(rgb(0x282c34))
                             .hover(|s| s.bg(rgb(0x1f2228)).border_color(rgb(0x4176e6)))
                             .cursor_pointer()
+                            .on_mouse_down(gpui::MouseButton::Left, handle_card1)
                             .flex()
                             .flex_col()
                             .gap_1()
@@ -240,6 +259,7 @@ impl ChatView {
                             .border_color(rgb(0x282c34))
                             .hover(|s| s.bg(rgb(0x1f2228)).border_color(rgb(0x4176e6)))
                             .cursor_pointer()
+                            .on_mouse_down(gpui::MouseButton::Left, handle_card2)
                             .flex()
                             .flex_col()
                             .gap_1()
@@ -261,6 +281,7 @@ impl ChatView {
                             .border_color(rgb(0x282c34))
                             .hover(|s| s.bg(rgb(0x1f2228)).border_color(rgb(0x4176e6)))
                             .cursor_pointer()
+                            .on_mouse_down(gpui::MouseButton::Left, handle_card3)
                             .flex()
                             .flex_col()
                             .gap_1()
@@ -276,6 +297,12 @@ impl ChatView {
     }
 
     fn render_active_messages(&self) -> impl IntoElement {
+        let user_prompt = if self.active_prompt.is_empty() {
+            "请帮我使用 Rust + GPUI 重构 DeepSeek Harness 原生桌面端！"
+        } else {
+            &self.active_prompt
+        };
+
         div()
             .flex_1()
             .p_4()
@@ -296,7 +323,7 @@ impl ChatView {
                             .bg(rgb(0x4176e6))
                             .text_sm()
                             .text_color(rgb(0xffffff))
-                            .child("请帮我使用 Rust + GPUI 重构 DeepSeek Harness 原生桌面端！"),
+                            .child(user_prompt.to_string()),
                     ),
             )
             // Assistant Card
@@ -343,19 +370,20 @@ impl ChatView {
                             .child("✓"),
                     )
                     .children(
-                        StreamingMarkdownParser::parse_markdown(
-                            "已成功建立与 **DeepSeek Harness** 守护进程的 120 FPS 极速双向数据管道！\n\n```rust\npub async fn run_agent() {\n    println!(\"DeepSeek Harness Native Desktop Ready!\");\n}\n```\n\n> [!TIP]\n> 完整的原生窗口拖拽、流式打字与代码 Diff 审查现已全面就绪。",
-                        )
-                        .into_iter()
-                        .map(|b| self.render_markdown_block(b)),
+                        StreamingMarkdownParser::parse_markdown(&self.streaming_text)
+                            .into_iter()
+                            .map(|b| self.render_markdown_block(b)),
                     ),
             )
     }
 }
 
 impl Render for ChatView {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let has_messages = self.active_preset_sent;
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let has_messages = self.has_messages;
+        let handle_send = cx.listener(|this, _, _, cx| {
+            this.send_prompt("请使用 Rust + GPUI 分析当前工程中的插件调用机制", cx);
+        });
 
         div()
             .flex_1()
@@ -370,7 +398,7 @@ impl Render for ChatView {
                 if has_messages {
                     self.render_active_messages().into_any_element()
                 } else {
-                    self.render_empty_state().into_any_element()
+                    self.render_empty_state(cx).into_any_element()
                 }
             )
             // Floating Input Composer (Official DeepSeek UI Style)
@@ -446,9 +474,7 @@ impl Render for ChatView {
                                             .font_weight(FontWeight::BOLD)
                                             .text_color(rgb(0xffffff))
                                             .cursor_pointer()
-                                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
-                                                cx.stop_propagation();
-                                            })
+                                            .on_mouse_down(gpui::MouseButton::Left, handle_send)
                                             .child("⏎ Send"),
                                     ),
                             ),
