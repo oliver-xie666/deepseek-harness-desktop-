@@ -1,6 +1,7 @@
 mod chat_view;
 mod details_drawer;
 mod dropdown;
+mod icons;
 mod settings_modal;
 mod sidebar;
 mod text_input;

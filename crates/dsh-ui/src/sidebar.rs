@@ -1,5 +1,7 @@
+use crate::icons;
+use crate::settings_modal::SettingsModal;
 use dsh_core::{FileNode, WorkspaceScanner};
-use gpui::{div, prelude::*, rgb, Context, FontWeight, IntoElement, Window};
+use gpui::{div, prelude::*, px, rgb, Context, Entity, FontWeight, IntoElement, Window};
 use std::path::Path;
 
 pub struct SessionItemView {
@@ -8,26 +10,27 @@ pub struct SessionItemView {
     pub is_active: bool,
 }
 
+/// Left column matching the official `SidebarRoot`: brand wordmark + panel
+/// toggle, a "新会话" action, the workspace/session browsing region, and a
+/// footer settings trigger.
 pub struct Sidebar {
     pub file_tree: Option<FileNode>,
     pub sessions: Vec<SessionItemView>,
     pub active_workspace: String,
-}
-
-impl Default for Sidebar {
-    fn default() -> Self {
-        Self::new()
-    }
+    pub collapsed: bool,
+    settings_modal: Entity<SettingsModal>,
 }
 
 impl Sidebar {
-    pub fn new() -> Self {
+    pub fn new(settings_modal: Entity<SettingsModal>) -> Self {
         let tree = WorkspaceScanner::scan_dir(Path::new("."), 2).ok();
 
         Self {
             file_tree: tree,
             sessions: Vec::new(),
             active_workspace: "deepseek-harness-desktop".into(),
+            collapsed: false,
+            settings_modal,
         }
     }
 
@@ -53,6 +56,15 @@ impl Sidebar {
         );
         cx.notify();
     }
+
+    pub fn toggle_collapse(&mut self, cx: &mut Context<Self>) {
+        self.collapsed = !self.collapsed;
+        cx.notify();
+    }
+
+    fn open_settings(&mut self, cx: &mut Context<Self>) {
+        self.settings_modal.update(cx, |modal, cx| modal.toggle(cx));
+    }
 }
 
 impl Render for Sidebar {
@@ -60,101 +72,128 @@ impl Render for Sidebar {
         let handle_new_chat = cx.listener(|this, _, _, cx| {
             this.add_new_session(cx);
         });
+        let handle_toggle = cx.listener(|this, _, _, cx| {
+            this.toggle_collapse(cx);
+        });
+        let handle_settings = cx.listener(|this, _, _, cx| {
+            this.open_settings(cx);
+        });
 
         let has_sessions = !self.sessions.is_empty();
+        let collapsed = self.collapsed;
 
         div()
-            .w_64()
+            .when(collapsed, |this| this.w(px(56.0)))
+            .when(!collapsed, |this| this.w_64())
             .h_full()
-            .bg(rgb(0x111215))
+            .bg(rgb(0x0d0f12))
             .border_r_1()
             .border_color(rgb(0x1a1c22))
             .flex()
             .flex_col()
             .justify_between()
-            .p_3()
             .overflow_hidden()
-            // Top Section
             .child(
                 div()
                     .flex()
                     .flex_col()
                     .gap_3()
-                    // ⊕ 新会话 (Dark Rounded Pill #212328)
-                    .child(
-                        div()
-                            .w_full()
-                            .py_2()
-                            .px_3()
-                            .rounded_xl()
-                            .bg(rgb(0x212328))
-                            .hover(|s| s.bg(rgb(0x2a2d35)))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .gap_2()
-                            .text_xs()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(rgb(0xe4e4e7))
-                            .cursor_pointer()
-                            .on_mouse_down(gpui::MouseButton::Left, handle_new_chat)
-                            .child("⊕ 新会话"),
-                    )
-                    // 工作区 Header + 🔍 ⇋ ⎘+
+                    .p_3()
+                    // Logo row: brand wordmark + panel toggle
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .justify_between()
-                            .px_1()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(rgb(0x979da6))
-                                    .child("工作区"),
-                            )
                             .child(
                                 div()
                                     .flex()
                                     .items_center()
                                     .gap_2()
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(rgb(0x61666b))
-                                            .hover(|s| s.text_color(rgb(0xffffff)))
-                                            .cursor_pointer()
-                                            .child("🔍"),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(rgb(0x61666b))
-                                            .hover(|s| s.text_color(rgb(0xffffff)))
-                                            .cursor_pointer()
-                                            .child("⇋"),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(rgb(0x61666b))
-                                            .hover(|s| s.text_color(rgb(0xffffff)))
-                                            .cursor_pointer()
-                                            .child("⎘+"),
-                                    ),
+                                    .cursor_pointer()
+                                    .child(icons::fish(18.0, rgb(0xffffff)))
+                                    .when(!collapsed, |this| {
+                                        this.children(vec![
+                                            div()
+                                                .text_sm()
+                                                .font_weight(FontWeight::SEMIBOLD)
+                                                .text_color(rgb(0xffffff))
+                                                .child("deepseek")
+                                                .into_any_element(),
+                                            div()
+                                                .px_1p5()
+                                                .py_0p5()
+                                                .rounded_sm()
+                                                .bg(rgb(0xe4e4e7))
+                                                .text_xs()
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_color(rgb(0x0d0f12))
+                                                .child("HARNESS")
+                                                .into_any_element(),
+                                        ])
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .size_6()
+                                    .rounded_md()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .text_color(rgb(0x979da6))
+                                    .hover(|s| s.bg(rgb(0x1a1c22)).text_color(rgb(0xffffff)))
+                                    .cursor_pointer()
+                                    .on_mouse_down(gpui::MouseButton::Left, handle_toggle)
+                                    .child(icons::panel_left(16.0, rgb(0x979da6))),
                             ),
                     )
-                    // Sessions List or 暂无会话
+                    // New session action
                     .child(
-                        if has_sessions {
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .px_2()
+                            .py_2()
+                            .rounded_lg()
+                            .bg(rgb(0x212328))
+                            .hover(|s| s.bg(rgb(0x2a2d35)))
+                            .cursor_pointer()
+                            .on_mouse_down(gpui::MouseButton::Left, handle_new_chat)
+                            .when(collapsed, |this| this.justify_center().px_0())
+                            .child(icons::new_chat(16.0, rgb(0xe4e4e7)))
+                            .when(!collapsed, |this| {
+                                this.child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(rgb(0xe4e4e7))
+                                        .child("新会话"),
+                                )
+                            }),
+                    )
+                    // Workspace section header
+                    .when(!collapsed, |this| {
+                        this.child(
+                            div().flex().items_center().justify_between().px_1().child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(rgb(0x979da6))
+                                    .child("工作区"),
+                            ),
+                        )
+                    })
+                    // Sessions list or empty hint
+                    .when(!collapsed, |this| {
+                        this.child(if has_sessions {
                             div()
                                 .flex()
                                 .flex_col()
                                 .gap_1()
                                 .children(self.sessions.iter().map(|sess| {
                                     let is_act = sess.is_active;
-                                    let bg = if is_act { rgb(0x212328) } else { rgb(0x111215) };
+                                    let bg = if is_act { rgb(0x212328) } else { rgb(0x0d0f12) };
                                     let fg = if is_act { rgb(0xffffff) } else { rgb(0x979da6) };
                                     let sess_id = sess.id.clone();
                                     let handle_click = cx.listener(move |this, _, _, cx| {
@@ -184,10 +223,10 @@ impl Render for Sidebar {
                                 .text_color(rgb(0x61666b))
                                 .child("暂无会话")
                                 .into_any_element()
-                        }
-                    ),
+                        })
+                    }),
             )
-            // Bottom Section: ⚙ 设置
+            // Footer: settings trigger
             .child(
                 div()
                     .flex()
@@ -195,13 +234,16 @@ impl Render for Sidebar {
                     .gap_2()
                     .px_2()
                     .py_2()
+                    .m_3()
                     .rounded_lg()
                     .hover(|s| s.bg(rgb(0x1a1c22)))
                     .cursor_pointer()
-                    .text_xs()
-                    .text_color(rgb(0x979da6))
-                    .child("⚙")
-                    .child("设置"),
+                    .on_mouse_down(gpui::MouseButton::Left, handle_settings)
+                    .when(collapsed, |this| this.justify_center().px_0())
+                    .child(icons::settings(16.0, rgb(0x979da6)))
+                    .when(!collapsed, |this| {
+                        this.child(div().text_xs().text_color(rgb(0x979da6)).child("设置"))
+                    }),
             )
     }
 }

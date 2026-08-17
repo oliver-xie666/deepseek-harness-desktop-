@@ -16,5 +16,9 @@ build/
 *.DS_Store
 Thumbs.db
 
+# Local UI reference screenshots (kept locally, never committed)
+01.png
+02.png
+
 # Embedded runtime local extractions
 resources/runtime/extracted/

@@ -1,17 +1,16 @@
-use gpui::{
-    div, prelude::*, rgb, Context, FontWeight, IntoElement, Window, WindowControlArea,
-};
+use gpui::{div, prelude::*, rgb, Context, IntoElement, Window, WindowControlArea};
 
+/// Slim native title strip: a full-width drag region carrying only the window
+/// controls. The brand mark lives in the sidebar (official `SidebarRoot`
+/// layout), so this bar stays chrome-only.
 pub struct TitleBar {
     pub workspace_name: String,
-    pub is_sidebar_open: bool,
 }
 
 impl TitleBar {
     pub fn new(workspace: &str) -> Self {
         Self {
             workspace_name: workspace.to_string(),
-            is_sidebar_open: true,
         }
     }
 }
@@ -19,76 +18,22 @@ impl TitleBar {
 impl Render for TitleBar {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .h_10()
+            .h_9()
             .w_full()
             .bg(rgb(0x0d0f12))
             .border_b_1()
             .border_color(rgb(0x1a1c22))
             .flex()
             .items_center()
-            .justify_between()
-            .px_3()
+            .justify_end()
             .window_control_area(WindowControlArea::Drag)
-            // Left: deepseek [HARNESS] + ◫
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2p5()
-                    .child(div().text_sm().child("🐳"))
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(rgb(0xffffff))
-                            .child("deepseek"),
-                    )
-                    .child(
-                        div()
-                            .px_1p5()
-                            .py_0p5()
-                            .rounded_sm()
-                            .border_1()
-                            .border_color(rgb(0x4a4d56))
-                            .text_xs()
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(rgb(0xd4d4d8))
-                            .child("HARNESS"),
-                    )
-                    .child(
-                        div()
-                            .size_6()
-                            .rounded_md()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_xs()
-                            .text_color(rgb(0x979da6))
-                            .hover(|s| s.bg(rgb(0x1a1c22)).text_color(rgb(0xffffff)))
-                            .cursor_pointer()
-                            .child("◫"),
-                    ),
-            )
-            // Right: 🔧, ─, ▢, ✕
+            // Right: window controls
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap_1()
-                    // Settings Wrench icon
-                    .child(
-                        div()
-                            .size_7()
-                            .rounded_md()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_xs()
-                            .text_color(rgb(0x979da6))
-                            .hover(|s| s.bg(rgb(0x1a1c22)).text_color(rgb(0xffffff)))
-                            .cursor_pointer()
-                            .child("🔧"),
-                    )
+                    .pr_1()
                     // Minimize
                     .child(
                         div()
@@ -101,9 +46,12 @@ impl Render for TitleBar {
                             .text_color(rgb(0x979da6))
                             .hover(|s| s.bg(rgb(0x1a1c22)).text_color(rgb(0xffffff)))
                             .cursor_pointer()
+                            .on_mouse_down(gpui::MouseButton::Left, |_, window, _| {
+                                window.minimize_window();
+                            })
                             .child("─"),
                     )
-                    // Maximize
+                    // Maximize / restore
                     .child(
                         div()
                             .size_7()

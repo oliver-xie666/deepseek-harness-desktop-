@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1051 468" fill="none">
+  <defs>
+    <filter id="g" x="-0.2" y="-0.2" width="1.4" height="1.4" filterUnits="objectBoundingBox">
+      <feGaussianBlur stdDeviation="50"/>
+    </filter>
+  </defs>
+  <g filter="url(#g)">
+    <ellipse cx="525.5" cy="234" rx="425.5" ry="134" fill="#fff"/>
+  </g>
+</svg>

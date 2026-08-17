@@ -1,9 +1,12 @@
 use crate::details_drawer::DetailsDrawer;
-use crate::dropdown::{ModelModeSelector, WorkspaceSelector};
+use crate::dropdown::{AgentPresetSelector, WorkspaceSelector};
+use crate::icons;
 use crate::text_input::TextInput;
 use dsh_core::AppState;
-use dsh_markdown::{CodeHighlighter, InlineSpan, MarkdownBlock, StreamingMarkdownParser, TokenType};
-use gpui::{div, prelude::*, rgb, Context, Entity, FontWeight, IntoElement, Window};
+use dsh_markdown::{
+    CodeHighlighter, InlineSpan, MarkdownBlock, StreamingMarkdownParser, TokenType,
+};
+use gpui::{div, prelude::*, px, rgb, rgba, Context, Entity, FontWeight, IntoElement, Window};
 use std::sync::Arc;
 
 pub struct ChatView {
@@ -11,24 +14,28 @@ pub struct ChatView {
     pub details_drawer: Entity<DetailsDrawer>,
     pub text_input: Entity<TextInput>,
     pub workspace_selector: Entity<WorkspaceSelector>,
-    pub model_selector: Entity<ModelModeSelector>,
+    pub preset_selector: Entity<AgentPresetSelector>,
     pub has_messages: bool,
     pub active_prompt: String,
     pub streaming_text: String,
 }
 
 impl ChatView {
-    pub fn new(state: Entity<Arc<AppState>>, details_drawer: Entity<DetailsDrawer>, cx: &mut Context<Self>) -> Self {
-        let text_input = cx.new(|cx| TextInput::new("选择一个工作区开始", cx));
+    pub fn new(
+        state: Entity<Arc<AppState>>,
+        details_drawer: Entity<DetailsDrawer>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let text_input = cx.new(|cx| TextInput::new("输入消息…", cx));
         let workspace_selector = cx.new(|_| WorkspaceSelector::new());
-        let model_selector = cx.new(|_| ModelModeSelector::new());
+        let preset_selector = cx.new(|_| AgentPresetSelector::new());
 
         Self {
             state,
             details_drawer,
             text_input,
             workspace_selector,
-            model_selector,
+            preset_selector,
             has_messages: false,
             active_prompt: String::new(),
             streaming_text: String::new(),
@@ -98,10 +105,17 @@ impl ChatView {
                     .py_1()
                     .child(format!("{} {}", "#".repeat(level as usize), text))
             }
-            MarkdownBlock::Paragraph { inlines } => {
-                div().py_1().flex().flex_wrap().gap_1().children(
-                    inlines.into_iter().map(|span| match span {
-                        InlineSpan::Bold(t) => div().font_weight(FontWeight::BOLD).text_color(rgb(0xffffff)).child(t),
+            MarkdownBlock::Paragraph { inlines } => div()
+                .py_1()
+                .flex()
+                .flex_wrap()
+                .gap_1()
+                .children(inlines.into_iter().map(|span| {
+                    match span {
+                        InlineSpan::Bold(t) => div()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(rgb(0xffffff))
+                            .child(t),
                         InlineSpan::Italic(t) => div().text_color(rgb(0xd4d4d8)).child(t),
                         InlineSpan::Code(t) => div()
                             .px_1p5()
@@ -124,9 +138,8 @@ impl ChatView {
                             .text_color(rgb(0x38bdf8))
                             .cursor_pointer()
                             .child(path),
-                    }),
-                )
-            }
+                    }
+                })),
             MarkdownBlock::CodeBlock { language, code } => {
                 let spans = CodeHighlighter::highlight(&code, &language);
 
@@ -153,12 +166,16 @@ impl ChatView {
                                 div()
                                     .cursor_pointer()
                                     .hover(|s| s.text_color(rgb(0xffffff)))
-                                    .child("📋 复制"),
+                                    .child("复制"),
                             ),
                     )
                     .child(
-                        div().p_3().text_xs().flex().flex_col().children(
-                            spans.into_iter().map(|span| {
+                        div()
+                            .p_3()
+                            .text_xs()
+                            .flex()
+                            .flex_col()
+                            .children(spans.into_iter().map(|span| {
                                 let color = match span.token_type {
                                     TokenType::Keyword => rgb(0xf43f5e),
                                     TokenType::Function => rgb(0x4176e6),
@@ -169,8 +186,7 @@ impl ChatView {
                                     _ => rgb(0xe4e4e7),
                                 };
                                 div().text_color(color).child(span.text)
-                            }),
-                        ),
+                            })),
                     )
             }
             MarkdownBlock::Alert { inlines, .. } => {
@@ -204,19 +220,30 @@ impl ChatView {
 
         div()
             .flex_1()
+            .relative()
             .flex()
             .flex_col()
             .items_center()
             .justify_center()
             .gap_6()
             .p_8()
-            // 🐳 探索未至之境 [预览版]
+            // Soft blue glow backdrop (official HeroGlow)
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(icons::glow(620.0, 276.0, rgba(0x6187D814))),
+            )
+            // Fish + headline + preview badge
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap_2p5()
-                    .child(div().text_2xl().child("🐳"))
+                    .child(icons::fish(34.0, rgb(0xffffff)))
                     .child(
                         div()
                             .font_weight(FontWeight::BOLD)
@@ -237,28 +264,26 @@ impl ChatView {
                             .child("预览版"),
                     ),
             )
-            // Floating Center Composer Card (Matching 01.png)
+            // Workspace + preset chips row, then the composer card
             .child(
                 div()
-                    .w(gpui::px(720.0))
+                    .w(px(720.0))
                     .flex()
                     .flex_col()
                     .gap_2()
-                    // Top Chips: [ 📁 选择工作区 ∨ ]  [ Ꮬ 标准模式 ∨ ]
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap_3()
+                            .gap_2()
                             .px_1()
                             .child(self.workspace_selector.clone())
-                            .child(self.model_selector.clone()),
+                            .child(self.preset_selector.clone()),
                     )
-                    // Big Composer Box
                     .child(
                         div()
                             .w_full()
-                            .min_h(gpui::px(120.0))
+                            .min_h(px(120.0))
                             .rounded_2xl()
                             .bg(rgb(0x181a20))
                             .border_1()
@@ -267,16 +292,13 @@ impl ChatView {
                             .flex()
                             .flex_col()
                             .justify_between()
-                            // Inner Text Input Field (Fully Interactive Typing)
                             .child(self.text_input.clone())
-                            // Bottom Action Row
                             .child(
                                 div()
                                     .flex()
                                     .items_center()
                                     .justify_between()
                                     .pt_2()
-                                    // + Attach button
                                     .child(
                                         div()
                                             .size_7()
@@ -286,11 +308,12 @@ impl ChatView {
                                             .justify_center()
                                             .text_sm()
                                             .text_color(rgb(0x61666b))
-                                            .hover(|s| s.bg(rgb(0x212328)).text_color(rgb(0xffffff)))
+                                            .hover(|s| {
+                                                s.bg(rgb(0x212328)).text_color(rgb(0xffffff))
+                                            })
                                             .cursor_pointer()
                                             .child("+"),
                                     )
-                                    // ↑ Upload / Send Button
                                     .child(
                                         div()
                                             .size_8()
@@ -322,7 +345,13 @@ impl ChatView {
         let drawer_entity = self.details_drawer.clone();
         let handle_tool_click = cx.listener(move |_this, _, _, cx| {
             drawer_entity.update(cx, |drawer, cx| {
-                drawer.open_tool("grep_search", 100, "{\n  \"query\": \"start_harness\",\n  \"path\": \"crates/\"\n}", "crates/dsh-core/src/lib.rs:84\n1 match found.", cx);
+                drawer.open_tool(
+                    "grep_search",
+                    100,
+                    "{\n  \"query\": \"start_harness\",\n  \"path\": \"crates/\"\n}",
+                    "crates/dsh-core/src/lib.rs:84\n1 match found.",
+                    cx,
+                );
             });
         });
 
@@ -333,24 +362,19 @@ impl ChatView {
             .flex()
             .flex_col()
             .gap_4()
-            // User Message Bubble (DeepSeek Blue, Right Aligned)
             .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .child(
-                        div()
-                            .max_w_3_4()
-                            .px_4()
-                            .py_2p5()
-                            .rounded_2xl()
-                            .bg(rgb(0x4176e6))
-                            .text_sm()
-                            .text_color(rgb(0xffffff))
-                            .child(user_prompt.to_string()),
-                    ),
+                div().flex().justify_end().child(
+                    div()
+                        .max_w_3_4()
+                        .px_4()
+                        .py_2p5()
+                        .rounded_2xl()
+                        .bg(rgb(0x4176e6))
+                        .text_sm()
+                        .text_color(rgb(0xffffff))
+                        .child(user_prompt.to_string()),
+                ),
             )
-            // Assistant Card
             .child(
                 div()
                     .flex()
@@ -362,7 +386,6 @@ impl ChatView {
                     .bg(rgb(0x15171b))
                     .border_1()
                     .border_color(rgb(0x282c34))
-                    // Clickable Tool Call Badge
                     .child(
                         div()
                             .flex()
@@ -410,15 +433,11 @@ impl Render for ChatView {
             .flex_col()
             .justify_between()
             .relative()
-            // Messages / Empty Area
-            .child(
-                if has_messages {
-                    self.render_active_messages(cx).into_any_element()
-                } else {
-                    self.render_empty_state(window, cx).into_any_element()
-                }
-            )
-            // Floating Bottom Composer Dock (When active in conversation)
+            .child(if has_messages {
+                self.render_active_messages(cx).into_any_element()
+            } else {
+                self.render_empty_state(window, cx).into_any_element()
+            })
             .when(has_messages, |this| {
                 this.child(
                     div()
@@ -429,7 +448,7 @@ impl Render for ChatView {
                         .items_center()
                         .child(
                             div()
-                                .max_w(gpui::px(720.0))
+                                .max_w(px(720.0))
                                 .w_full()
                                 .rounded_2xl()
                                 .bg(rgb(0x181a20))
