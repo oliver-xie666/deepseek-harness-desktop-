@@ -1,22 +1,23 @@
-mod chat_view;
-mod diff_panel;
-mod settings_modal;
-mod sidebar;
-mod title_bar;
-mod workspace;
-
 use clap::Parser;
 use dsh_common::init_logging;
-use dsh_core::AppState;
 use dsh_daemon::{DaemonConfig, DaemonManager};
-use gpui::{App, AppContext, Bounds, WindowBounds, WindowOptions, px, size};
-use gpui_platform::application;
 use std::path::PathBuf;
+use std::sync::Arc;
+use tao::{
+    dpi::LogicalSize,
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowBuilder,
+};
 use tracing::info;
-use workspace::WorkspaceView;
+use wry::WebViewBuilder;
 
 #[derive(Parser, Debug)]
-#[command(name = "dsh-desktop", version = "0.1.0", about = "DeepSeek Harness Native Desktop Workspace")]
+#[command(
+    name = "dsh-desktop",
+    version = "0.1.0",
+    about = "DeepSeek Harness Native Desktop Workspace"
+)]
 struct CliArgs {
     /// Workspace root directory path
     #[arg(default_value = ".")]
@@ -26,8 +27,8 @@ struct CliArgs {
     #[arg(short, long)]
     port: Option<u16>,
 
-    /// Run with embedded mock daemon (no live LLM key required)
-    #[arg(long, default_value_t = true)]
+    /// Run with embedded mock daemon
+    #[arg(long, default_value_t = false)]
     mock: bool,
 
     /// Default model name
@@ -40,12 +41,12 @@ fn main() {
     init_logging();
 
     info!(
-        "Starting DeepSeek Harness Desktop (workspace: {}, mock: {})...",
+        "Starting DeepSeek Harness Native Desktop (workspace: {}, mock: {})...",
         args.workspace.display(),
         args.mock
     );
 
-    // Initialize dedicated background Tokio Multi-Thread Runtime for Daemon & WebSocket IPC
+    // Initialize dedicated background Tokio Multi-Thread Runtime
     let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -55,8 +56,8 @@ fn main() {
 
     let port = args
         .port
-        .or_else(|| DaemonManager::find_available_port(3000, 3100).ok())
-        .unwrap_or(3000);
+        .or_else(|| DaemonManager::find_available_port(3080, 3180).ok())
+        .unwrap_or(3080);
 
     let daemon_config = DaemonConfig {
         port,
@@ -64,40 +65,50 @@ fn main() {
         ..Default::default()
     };
 
-    let (app_state, outbox_rx) = AppState::new(daemon_config);
-    let app_state_clone = app_state.clone();
+    let daemon_manager = Arc::new(DaemonManager::new(daemon_config));
+    let daemon_clone = daemon_manager.clone();
 
-    // Start background runtime & WebSocket worker inside Tokio runtime
+    // Start background daemon process
     tokio_runtime.spawn(async move {
-        if let Err(e) = app_state_clone.daemon_manager.start().await {
-            tracing::warn!("Failed to start daemon manager: {}", e);
+        if let Err(e) = daemon_clone.start().await {
+            tracing::warn!("Failed to start deepseek-harness daemon: {}", e);
         }
     });
 
-    let _ws_client = AppState::start_background_client(app_state.clone(), outbox_rx);
+    // Wait for daemon readiness
+    let target_url = daemon_manager.http_url();
+    info!("Target DeepSeek Harness URL: {}", target_url);
 
-    // Start GPUI foreground application loop
-    application().run(move |cx: &mut App| {
-        let bounds = Bounds::centered(None, size(px(1280.0), px(800.0)), cx);
-        let state_for_window = app_state.clone();
+    // Create native Windows Desktop window
+    let event_loop = EventLoop::new();
+    let window = WindowBuilder::new()
+        .with_title("DeepSeek Harness")
+        .with_inner_size(LogicalSize::new(1280.0, 800.0))
+        .with_min_inner_size(LogicalSize::new(900.0, 600.0))
+        .with_resizable(true)
+        .build(&event_loop)
+        .expect("Failed to create native desktop window");
 
-        cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                titlebar: Some(gpui::TitlebarOptions {
-                    title: Some("DeepSeek Harness".into()),
-                    appears_transparent: true,
-                    traffic_light_position: None,
-                }),
-                ..Default::default()
-            },
-            move |_, cx| {
-                let state_model = cx.new(|_| state_for_window.clone());
-                cx.new(|cx| WorkspaceView::new(state_model, cx))
-            },
-        )
-        .expect("Failed to open main window");
+    let _webview = WebViewBuilder::new()
+        .with_url(&target_url)
+        .build(&window)
+        .expect("Failed to initialize DirectX WebView hardware engine");
 
-        cx.activate(true);
+    let daemon_for_shutdown = daemon_manager.clone();
+
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::Wait;
+
+        if let Event::WindowEvent {
+            event: WindowEvent::CloseRequested,
+            ..
+        } = event
+        {
+            let daemon_shutdown = daemon_for_shutdown.clone();
+            tokio::spawn(async move {
+                let _ = daemon_shutdown.stop().await;
+            });
+            *control_flow = ControlFlow::Exit;
+        }
     });
 }

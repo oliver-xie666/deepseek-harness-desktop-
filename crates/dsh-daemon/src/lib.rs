@@ -25,17 +25,17 @@ pub struct DaemonConfig {
 impl Default for DaemonConfig {
     fn default() -> Self {
         Self {
-            port: 3000,
+            port: 3080,
             host: "127.0.0.1".to_string(),
             runtime_path: AppPaths::runtime_dir(),
             auto_restart: true,
-            use_embedded_mock: true,
+            use_embedded_mock: false,
         }
     }
 }
 
 pub struct DaemonManager {
-    config: DaemonConfig,
+    pub config: DaemonConfig,
     child: Arc<Mutex<Option<Child>>>,
     is_running: Arc<AtomicBool>,
 }
@@ -63,7 +63,7 @@ impl DaemonManager {
         )))
     }
 
-    /// Prepares runtime directory (unpacking if needed)
+    /// Prepares runtime directory
     pub async fn ensure_runtime(&self) -> Result<PathBuf> {
         let runtime_dir = &self.config.runtime_path;
         if !runtime_dir.exists() {
@@ -76,7 +76,7 @@ impl DaemonManager {
         Ok(runtime_dir.clone())
     }
 
-    /// Starts either the embedded mock server or the Node.js dsh subprocess
+    /// Starts either the embedded mock server or the DeepSeek Harness daemon subprocess
     pub async fn start(&self) -> Result<()> {
         if self.is_running() {
             info!("Daemon is already running.");
@@ -92,6 +92,21 @@ impl DaemonManager {
         }
 
         self.is_running.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    /// Waits until daemon server is accepting connections
+    pub async fn wait_for_ready(&self, timeout_secs: u64) -> Result<()> {
+        let start = std::time::Instant::now();
+        let addr = format!("{}:{}", self.config.host, self.config.port);
+        while start.elapsed().as_secs() < timeout_secs {
+            if tokio::net::TcpStream::connect(&addr).await.is_ok() {
+                info!("DeepSeek Harness Daemon ready on {}", self.http_url());
+                return Ok(());
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+        }
+        warn!("Daemon connection wait reached timeout, continuing...");
         Ok(())
     }
 
@@ -120,7 +135,6 @@ impl DaemonManager {
                                             text: prompt,
                                             ..
                                         } => {
-                                            // 1. Send Thinking state
                                             let evt = HarnessServerEvent::AgentStateChange {
                                                 session_id: session_id.clone(),
                                                 state: AgentState::Thinking,
@@ -131,9 +145,8 @@ impl DaemonManager {
                                                 ))
                                                 .await;
 
-                                            // 2. Stream tokens
                                             let response = format!(
-                                                "收到您的请求：\"{}\"。正在使用 DeepSeek-V3 为您分析并生成 Rust 代码：\n\n```rust\npub fn greet() {{\n    println!(\"Hello from DeepSeek Harness Native!\");\n}}\n```\n\n> [!TIP]\n> 这是一个由内置 WebSocket 实时推送的高性能流式响应！",
+                                                "收到您的请求：\"{}\"。正在使用 DeepSeek-V3 为您分析并生成 Rust 代码：\n\n```rust\npub fn greet() {{\n    println!(\"Hello from DeepSeek Harness Native Desktop!\");\n}}\n```\n\n> [!TIP]\n> 100% 纯 Rust 原生硬件加速流式响应就绪！",
                                                 prompt
                                             );
 
@@ -152,7 +165,6 @@ impl DaemonManager {
                                                     .await;
                                             }
 
-                                            // 3. Send Tool call
                                             let call_id = uuid::Uuid::new_v4().to_string();
                                             let tool_start = HarnessServerEvent::ToolCallStart {
                                                 session_id: session_id.clone(),
@@ -181,7 +193,6 @@ impl DaemonManager {
                                                 ))
                                                 .await;
 
-                                            // 4. Send State completed
                                             let completed = HarnessServerEvent::AgentStateChange {
                                                 session_id: session_id.clone(),
                                                 state: AgentState::Completed,
@@ -216,24 +227,37 @@ impl DaemonManager {
     async fn start_node_subprocess(&self) -> Result<()> {
         let mut child_guard = self.child.lock().await;
 
-        #[cfg(target_os = "windows")]
-        let node_bin = "node.exe";
-        #[cfg(not(target_os = "windows"))]
-        let node_bin = "node";
+        let local_harness = PathBuf::from("D:/typeScript/deepseek-harness");
+        let mut cmd = if local_harness.exists() {
+            #[cfg(target_os = "windows")]
+            let mut c = Command::new("cmd.exe");
+            #[cfg(target_os = "windows")]
+            c.args(["/C", "pnpm", "dsh", "web", "--port", &self.config.port.to_string()]);
+            #[cfg(not(target_os = "windows"))]
+            let mut c = Command::new("pnpm");
+            #[cfg(not(target_os = "windows"))]
+            c.args(["dsh", "web", "--port", &self.config.port.to_string()]);
 
-        let mut cmd = Command::new(node_bin);
-        cmd.arg("-e")
-            .arg(format!(
-                "console.log('DeepSeek Harness Node Daemon on port {}'); setInterval(() => {{}}, 1000);",
-                self.config.port
-            ))
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            c.current_dir(&local_harness);
+            c
+        } else {
+            #[cfg(target_os = "windows")]
+            let mut c = Command::new("cmd.exe");
+            #[cfg(target_os = "windows")]
+            c.args(["/C", "npx", "@deepseek-ai/dsh", "web", "--port", &self.config.port.to_string()]);
+            #[cfg(not(target_os = "windows"))]
+            let mut c = Command::new("npx");
+            #[cfg(not(target_os = "windows"))]
+            c.args(["@deepseek-ai/dsh", "web", "--port", &self.config.port.to_string()]);
+            c
+        };
+
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
-                warn!("Failed to spawn node: {}. Falling back to mock.", e);
+                warn!("Failed to spawn deepseek-harness daemon: {}. Falling back to embedded mock.", e);
                 return self.start_mock_server().await;
             }
         };
@@ -277,6 +301,10 @@ impl DaemonManager {
 
     pub fn ws_url(&self) -> String {
         format!("ws://{}:{}", self.config.host, self.config.port)
+    }
+
+    pub fn http_url(&self) -> String {
+        format!("http://{}:{}", self.config.host, self.config.port)
     }
 }
 

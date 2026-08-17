@@ -21,3 +21,5 @@ gpui_platform.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 clap.workspace = true
+wry = "0.56.1"
+tao = "0.36.0"
