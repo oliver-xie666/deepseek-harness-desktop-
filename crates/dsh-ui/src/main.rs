@@ -1,5 +1,5 @@
 mod chat_view;
-mod diff_panel;
+mod details_drawer;
 mod settings_modal;
 mod sidebar;
 mod title_bar;
@@ -10,7 +10,7 @@ use clap::Parser;
 use dsh_common::init_logging;
 use dsh_core::AppState;
 use dsh_daemon::{DaemonConfig, DaemonManager};
-use gpui::{px, size, AppContext, Bounds, WindowBounds, WindowOptions};
+use gpui::{px, size, AppContext, Bounds, TitlebarOptions, WindowBounds, WindowOptions};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::info;
@@ -89,11 +89,16 @@ fn main() {
                 origin: Default::default(),
                 size: size(px(1280.0), px(800.0)),
             })),
-            titlebar: None,
+            titlebar: Some(TitlebarOptions {
+                title: None,
+                appears_transparent: true,
+                traffic_light_position: None,
+            }),
             focus: true,
             show: true,
             kind: gpui::WindowKind::Normal,
             is_movable: true,
+            app_owns_titlebar_drag: true,
             display_id: None,
             window_background: gpui::WindowBackgroundAppearance::Opaque,
             ..Default::default()

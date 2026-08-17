@@ -1,3 +1,4 @@
+use crate::details_drawer::DetailsDrawer;
 use dsh_core::AppState;
 use dsh_markdown::{CodeHighlighter, InlineSpan, MarkdownBlock, StreamingMarkdownParser, TokenType};
 use gpui::{div, prelude::*, rgb, Context, Entity, FontWeight, IntoElement, Window};
@@ -5,18 +6,22 @@ use std::sync::Arc;
 
 pub struct ChatView {
     pub state: Entity<Arc<AppState>>,
+    pub details_drawer: Entity<DetailsDrawer>,
     pub has_messages: bool,
     pub active_prompt: String,
     pub streaming_text: String,
+    pub is_streaming: bool,
 }
 
 impl ChatView {
-    pub fn new(state: Entity<Arc<AppState>>, _cx: &mut Context<Self>) -> Self {
+    pub fn new(state: Entity<Arc<AppState>>, details_drawer: Entity<DetailsDrawer>, _cx: &mut Context<Self>) -> Self {
         Self {
             state,
+            details_drawer,
             has_messages: false,
             active_prompt: String::new(),
             streaming_text: String::new(),
+            is_streaming: false,
         }
     }
 
@@ -24,13 +29,15 @@ impl ChatView {
         self.has_messages = false;
         self.active_prompt.clear();
         self.streaming_text.clear();
+        self.is_streaming = false;
         cx.notify();
     }
 
     pub fn send_prompt(&mut self, prompt: &str, cx: &mut Context<Self>) {
         self.has_messages = true;
         self.active_prompt = prompt.to_string();
-        self.streaming_text = "已成功连接 DeepSeek-V3 智能体！正在分析上下文并为您实时生成：\n\n```rust\npub async fn run_agent_task() {\n    println!(\"DeepSeek Harness 120 FPS DirectX Engine Online!\");\n}\n```\n\n> [!TIP]\n> 100% 纯 Rust + GPUI 原生 GPU 硬件加速渲染就绪。".to_string();
+        self.streaming_text = "正在实时连接 DeepSeek Harness 守护进程...\n\n```rust\npub async fn run_agent() {\n    println!(\"120 FPS Realtime Agent Stream!\");\n}\n```\n\n[ !TIP ] WebSocket IPC 已成功建立双向数据通路!".to_string();
+        self.is_streaming = false;
         cx.notify();
 
         let state_arc = self.state.read(cx).clone();
@@ -65,7 +72,7 @@ impl ChatView {
 
                 div()
                     .font_weight(FontWeight::BOLD)
-                    .text_color(rgb(0x4176e6))
+                    .text_color(rgb(0xffffff))
                     .py_1()
                     .child(format!("{} {}", "#".repeat(level as usize), text))
             }
@@ -116,7 +123,7 @@ impl ChatView {
                             .justify_between()
                             .px_3()
                             .py_1p5()
-                            .bg(rgb(0x1c1f26))
+                            .bg(rgb(0x191c22))
                             .text_xs()
                             .text_color(rgb(0x979da6))
                             .child(language)
@@ -170,13 +177,13 @@ impl ChatView {
 
     fn render_empty_state(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let handle_card1 = cx.listener(|this, _, _, cx| {
-            this.send_prompt("请帮我探索当前代码库架构与核心模块划分", cx);
+            this.send_prompt("请帮我用 Rust + GPUI 重构 DeepSeek Harness 桌面端", cx);
         });
         let handle_card2 = cx.listener(|this, _, _, cx| {
-            this.send_prompt("请帮我重构 WebSocket 自动重连与指数退避逻辑", cx);
+            this.send_prompt("请帮我分析当前工程中的插件调用机制", cx);
         });
         let handle_card3 = cx.listener(|this, _, _, cx| {
-            this.send_prompt("请审查当前 Git Diff 变更并自动生成测试用例", cx);
+            this.send_prompt("请帮我重构 WebSocket 自动重连与指数退避逻辑", cx);
         });
 
         div()
@@ -197,7 +204,7 @@ impl ChatView {
                         div()
                             .size_16()
                             .rounded_2xl()
-                            .bg(rgb(0x1f2228))
+                            .bg(rgb(0x15171b))
                             .border_1()
                             .border_color(rgb(0x282c34))
                             .flex()
@@ -220,7 +227,7 @@ impl ChatView {
                             .child("DeepSeek-V3 & DeepSeek-R1 powered Native Coding Agent"),
                     ),
             )
-            // Quick Action Suggestion Cards (Interactive Click Handlers)
+            // 3 Quick Action Suggestion Cards
             .child(
                 div()
                     .flex()
@@ -263,12 +270,12 @@ impl ChatView {
                             .flex()
                             .flex_col()
                             .gap_1()
-                            .child(div().text_sm().child("⚡ 重构核心组件"))
+                            .child(div().text_sm().child("⚡ 插件系统调用"))
                             .child(
                                 div()
                                     .text_xs()
                                     .text_color(rgb(0x979da6))
-                                    .child("120 FPS 异步流式优化"),
+                                    .child("IPC 双向协议与 MCP 插件挂载"),
                             ),
                     )
                     .child(
@@ -285,32 +292,39 @@ impl ChatView {
                             .flex()
                             .flex_col()
                             .gap_1()
-                            .child(div().text_sm().child("🛠️ 审查当前 Diff 变更"))
+                            .child(div().text_sm().child("🛠️ 异步流式优化"))
                             .child(
                                 div()
                                     .text_xs()
                                     .text_color(rgb(0x979da6))
-                                    .child("自动生成自动化回归测试用例"),
+                                    .child("120 FPS 原生 GPU 流式打字"),
                             ),
                     ),
             )
     }
 
-    fn render_active_messages(&self) -> impl IntoElement {
+    fn render_active_messages(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let user_prompt = if self.active_prompt.is_empty() {
-            "请帮我使用 Rust + GPUI 重构 DeepSeek Harness 原生桌面端！"
+            "请帮我用 Rust + GPUI 重构 DeepSeek Harness 桌面端"
         } else {
             &self.active_prompt
         };
 
+        let drawer_entity = self.details_drawer.clone();
+        let handle_tool_click = cx.listener(move |_this, _, _, cx| {
+            drawer_entity.update(cx, |drawer, cx| {
+                drawer.open_tool("grep_search", 100, "{\n  \"query\": \"run_agent\",\n  \"path\": \"crates/\"\n}", "crates/dsh-ui/src/main.rs:42\n1 match found.", cx);
+            });
+        });
+
         div()
             .flex_1()
-            .p_4()
+            .p_6()
             .overflow_hidden()
             .flex()
             .flex_col()
             .gap_4()
-            // User Bubble
+            // User Message Bubble (DeepSeek Blue, Right Aligned)
             .child(
                 div()
                     .flex()
@@ -318,7 +332,8 @@ impl ChatView {
                     .child(
                         div()
                             .max_w_3_4()
-                            .p_3p5()
+                            .px_4()
+                            .py_2p5()
                             .rounded_2xl()
                             .bg(rgb(0x4176e6))
                             .text_sm()
@@ -331,43 +346,36 @@ impl ChatView {
                 div()
                     .flex()
                     .flex_col()
-                    .gap_2()
+                    .gap_3()
                     .max_w_full()
                     .p_4()
                     .rounded_2xl()
                     .bg(rgb(0x15171b))
                     .border_1()
                     .border_color(rgb(0x282c34))
+                    // Clickable Tool Call Badge
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .gap_2()
-                            .child(div().text_base().child("🐳"))
-                            .child(
-                                div()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_xs()
-                                    .text_color(rgb(0x4176e6))
-                                    .child("DeepSeek-V3"),
-                            ),
-                    )
-                    // Tool Call Badge
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .px_2p5()
-                            .py_1()
-                            .rounded_full()
-                            .bg(rgb(0x1f2228))
+                            .px_3()
+                            .py_1p5()
+                            .rounded_md()
+                            .bg(rgb(0x191c22))
                             .border_1()
                             .border_color(rgb(0x282c34))
-                            .text_xs()
-                            .text_color(rgb(0x979da6))
-                            .child("🔧 grep_search (100ms)")
-                            .child("✓"),
+                            .hover(|s| s.bg(rgb(0x1f2228)).border_color(rgb(0x4176e6)))
+                            .cursor_pointer()
+                            .on_mouse_down(gpui::MouseButton::Left, handle_tool_click)
+                            .child(div().text_xs().child("🔧"))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(rgb(0x979da6))
+                                    .child("grep_search (100ms)"),
+                            )
+                            .child(div().text_xs().text_color(rgb(0x22c55e)).child("✓")),
                     )
                     .children(
                         StreamingMarkdownParser::parse_markdown(&self.streaming_text)
@@ -382,7 +390,7 @@ impl Render for ChatView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let has_messages = self.has_messages;
         let handle_send = cx.listener(|this, _, _, cx| {
-            this.send_prompt("请使用 Rust + GPUI 分析当前工程中的插件调用机制", cx);
+            this.send_prompt("请帮我用 Rust + GPUI 重构 DeepSeek Harness 桌面端", cx);
         });
 
         div()
@@ -396,12 +404,12 @@ impl Render for ChatView {
             // Messages / Empty Area
             .child(
                 if has_messages {
-                    self.render_active_messages().into_any_element()
+                    self.render_active_messages(cx).into_any_element()
                 } else {
                     self.render_empty_state(cx).into_any_element()
                 }
             )
-            // Floating Input Composer (Official DeepSeek UI Style)
+            // Floating Input Composer (Matching official design)
             .child(
                 div()
                     .p_4()
@@ -413,70 +421,39 @@ impl Render for ChatView {
                         div()
                             .max_w(gpui::px(768.0))
                             .w_full()
-                            .rounded_2xl()
+                            .rounded_xl()
                             .bg(rgb(0x15171b))
                             .border_1()
                             .border_color(rgb(0x282c34))
-                            .p_3()
+                            .p_2p5()
                             .flex()
-                            .flex_col()
-                            .gap_2()
+                            .items_center()
+                            .justify_between()
+                            .gap_3()
                             // Input line
                             .child(
                                 div()
                                     .flex_1()
                                     .px_2()
-                                    .py_1p5()
+                                    .py_1()
                                     .text_sm()
-                                    .text_color(rgb(0xe4e4e7))
-                                    .child("输入需求，按 Enter 发送，或键入 @ 引用文件与 MCP 工具..."),
+                                    .text_color(rgb(0x979da6))
+                                    .child("输入指令，按 Enter 发送，或键入 @ 引用代码..."),
                             )
-                            // Composer Footer Controls
+                            // Send Action Button (DeepSeek Blue)
                             .child(
                                 div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .px_2()
-                                                    .py_1()
-                                                    .rounded_md()
-                                                    .bg(rgb(0x1f2228))
-                                                    .text_xs()
-                                                    .text_color(rgb(0x979da6))
-                                                    .child("🤖 DeepSeek-V3"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .px_2()
-                                                    .py_1()
-                                                    .rounded_md()
-                                                    .bg(rgb(0x1f2228))
-                                                    .text_xs()
-                                                    .text_color(rgb(0x4176e6))
-                                                    .child("⚡ Full Access"),
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .px_4()
-                                            .py_1p5()
-                                            .rounded_lg()
-                                            .bg(rgb(0x4176e6))
-                                            .hover(|s| s.bg(rgb(0x4d93f8)))
-                                            .text_xs()
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(rgb(0xffffff))
-                                            .cursor_pointer()
-                                            .on_mouse_down(gpui::MouseButton::Left, handle_send)
-                                            .child("⏎ Send"),
-                                    ),
+                                    .px_4()
+                                    .py_1p5()
+                                    .rounded_lg()
+                                    .bg(rgb(0x4176e6))
+                                    .hover(|s| s.bg(rgb(0x4d93f8)))
+                                    .text_xs()
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(rgb(0xffffff))
+                                    .cursor_pointer()
+                                    .on_mouse_down(gpui::MouseButton::Left, handle_send)
+                                    .child("发送 ⏎"),
                             ),
                     ),
             )

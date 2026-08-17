@@ -29,17 +29,17 @@ impl Sidebar {
             sessions: vec![
                 SessionItemView {
                     id: "1".into(),
-                    title: "🚀 DeepSeek Harness Desktop".into(),
+                    title: "🚀 Project Scaffolding".into(),
                     is_active: true,
                 },
                 SessionItemView {
                     id: "2".into(),
-                    title: "⚡ Refactor WebSocket Reconnect".into(),
+                    title: "🔧 Fix WebSocket Reconnect".into(),
                     is_active: false,
                 },
                 SessionItemView {
                     id: "3".into(),
-                    title: "🎨 120 FPS GPUI Markdown Theme".into(),
+                    title: "🎨 Markdown Syntax Theme".into(),
                     is_active: false,
                 },
             ],
@@ -128,9 +128,9 @@ impl Render for Sidebar {
         div()
             .w_64()
             .h_full()
-            .bg(rgb(0x15171b))
+            .bg(rgb(0x0f1115))
             .border_r_1()
-            .border_color(rgb(0x23262d))
+            .border_color(rgb(0x1f2228))
             .flex()
             .flex_col()
             .p_3()
@@ -154,7 +154,7 @@ impl Render for Sidebar {
                     .text_color(rgb(0xffffff))
                     .cursor_pointer()
                     .on_mouse_down(gpui::MouseButton::Left, handle_new_chat)
-                    .child("💬 + New Session"),
+                    .child("+ New Session"),
             )
             // Section 1: Workspaces & File Explorer
             .child(
@@ -187,7 +187,7 @@ impl Render for Sidebar {
                     ),
             )
             // Divider
-            .child(div().h_px().bg(rgb(0x23262d)))
+            .child(div().h_px().bg(rgb(0x1f2228)))
             // Section 2: Recent Sessions
             .child(
                 div()
@@ -203,7 +203,7 @@ impl Render for Sidebar {
                     )
                     .children(self.sessions.iter().map(|sess| {
                         let is_act = sess.is_active;
-                        let bg = if is_act { rgb(0x1f2228) } else { rgb(0x15171b) };
+                        let bg = if is_act { rgb(0x1f2228) } else { rgb(0x0f1115) };
                         let fg = if is_act { rgb(0xffffff) } else { rgb(0x979da6) };
                         let sess_id = sess.id.clone();
                         let handle_click = cx.listener(move |this, _, _, cx| {
@@ -228,13 +228,6 @@ impl Render for Sidebar {
                                     .gap_2()
                                     .child(
                                         div()
-                                            .w_1()
-                                            .h_3()
-                                            .rounded_full()
-                                            .bg(if is_act { rgb(0x4176e6) } else { rgb(0x00000000) }),
-                                    )
-                                    .child(
-                                        div()
                                             .text_xs()
                                             .font_weight(if is_act { FontWeight::MEDIUM } else { FontWeight::NORMAL })
                                             .text_color(fg)
@@ -244,7 +237,7 @@ impl Render for Sidebar {
                     })),
             )
             // Divider
-            .child(div().h_px().bg(rgb(0x23262d)))
+            .child(div().h_px().bg(rgb(0x1f2228)))
             // Section 3: Active MCP Tools Foot
             .child(
                 div()
@@ -256,22 +249,18 @@ impl Render for Sidebar {
                             .text_xs()
                             .font_weight(FontWeight::BOLD)
                             .text_color(rgb(0x61666b))
-                            .child("ACTIVE MCP PLUGINS"),
+                            .child("ACTIVE MCP TOOLS"),
                     )
                     .child(
                         div()
                             .flex()
-                            .flex_wrap()
-                            .gap_1p5()
+                            .flex_col()
+                            .gap_1()
                             .children(self.mcp_tools.iter().map(|tool| {
                                 div()
                                     .flex()
                                     .items_center()
-                                    .gap_1()
-                                    .px_2()
-                                    .py_0p5()
-                                    .rounded_md()
-                                    .bg(rgb(0x1f2228))
+                                    .gap_1p5()
                                     .text_xs()
                                     .text_color(rgb(0x979da6))
                                     .child(div().size_1p5().rounded_full().bg(rgb(0x4176e6)))

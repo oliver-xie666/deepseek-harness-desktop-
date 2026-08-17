@@ -1,4 +1,6 @@
-use gpui::{div, prelude::*, rgb, Context, FontWeight, IntoElement, Window};
+use gpui::{
+    div, prelude::*, rgb, Context, FontWeight, IntoElement, Window, WindowControlArea,
+};
 
 pub struct TitleBar {
     pub workspace_name: String,
@@ -18,61 +20,45 @@ impl TitleBar {
 
 impl Render for TitleBar {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let status_color = if self.is_connected {
-            rgb(0x22c55e)
-        } else {
-            rgb(0xef4444)
-        };
-
         div()
             .h_10()
             .w_full()
-            .bg(rgb(0x13151b))
+            .bg(rgb(0x0f1115))
             .border_b_1()
-            .border_color(rgb(0x23262d))
+            .border_color(rgb(0x1f2228))
             .flex()
             .items_center()
             .justify_between()
             .px_3()
+            .window_control_area(WindowControlArea::Drag)
             // Left: DeepSeek Brand & Workspace
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap_2p5()
-                    .child(div().text_base().child("🐳"))
+                    .gap_2()
                     .child(
                         div()
                             .text_sm()
                             .font_weight(FontWeight::BOLD)
                             .text_color(rgb(0x4176e6))
-                            .child("DeepSeek Harness"),
+                            .child("⚡ DeepSeek Harness"),
                     )
-                    .child(div().text_xs().text_color(rgb(0x61666b)).child("/"))
+                    .child(div().text_xs().text_color(rgb(0x61666b)).child("•"))
                     .child(
                         div()
                             .text_xs()
                             .text_color(rgb(0x979da6))
-                            .child(format!("📁 {}", self.workspace_name)),
+                            .child(self.workspace_name.clone()),
                     ),
             )
-            // Center: Draggable Window Region
-            .child(
-                div()
-                    .flex_1()
-                    .h_full()
-                    .cursor_default()
-                    .on_mouse_down(gpui::MouseButton::Left, |_, window, _| {
-                        window.start_window_move();
-                    }),
-            )
-            // Right: Model, Status & Window Controls
+            // Right: Model Pill, Status Pill, Settings Pill & Controls
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap_3()
-                    // Active Model Tag
+                    .gap_2p5()
+                    // Model Tag
                     .child(
                         div()
                             .flex()
@@ -81,9 +67,9 @@ impl Render for TitleBar {
                             .px_2p5()
                             .py_1()
                             .rounded_md()
-                            .bg(rgb(0x1f2228))
+                            .bg(rgb(0x15171b))
                             .border_1()
-                            .border_color(rgb(0x2c2c2e))
+                            .border_color(rgb(0x282c34))
                             .text_xs()
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(rgb(0xe4e4e7))
@@ -96,14 +82,38 @@ impl Render for TitleBar {
                             .flex()
                             .items_center()
                             .gap_1p5()
+                            .px_2p5()
+                            .py_1()
+                            .rounded_md()
+                            .bg(rgb(0x15171b))
+                            .border_1()
+                            .border_color(rgb(0x282c34))
                             .text_xs()
-                            .text_color(rgb(0x979da6))
-                            .child(div().size_2().rounded_full().bg(status_color))
-                            .child(if self.is_connected { "Online" } else { "Disconnected" }),
+                            .text_color(rgb(0xe4e4e7))
+                            .child(div().size_2().rounded_full().bg(rgb(0x22c55e)))
+                            .child("Daemon: Online"),
+                    )
+                    // Settings Pill
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1p5()
+                            .px_2p5()
+                            .py_1()
+                            .rounded_md()
+                            .bg(rgb(0x15171b))
+                            .border_1()
+                            .border_color(rgb(0x282c34))
+                            .hover(|s| s.bg(rgb(0x1f2228)))
+                            .cursor_pointer()
+                            .text_xs()
+                            .text_color(rgb(0xe4e4e7))
+                            .child("⚙️ Settings"),
                     )
                     // Divider
-                    .child(div().w_px().h_4().bg(rgb(0x2c2c2e)))
-                    // Window Control: Minimize & Close
+                    .child(div().w_px().h_4().bg(rgb(0x282c34)))
+                    // Window Controls: Minimize & Close
                     .child(
                         div()
                             .flex()
@@ -118,7 +128,7 @@ impl Render for TitleBar {
                                     .justify_center()
                                     .text_xs()
                                     .text_color(rgb(0x979da6))
-                                    .hover(|s| s.bg(rgb(0x282c34)).text_color(rgb(0xffffff)))
+                                    .hover(|s| s.bg(rgb(0x1f2228)).text_color(rgb(0xffffff)))
                                     .cursor_pointer()
                                     .child("─"),
                             )
