@@ -1,0 +1,25 @@
+[package]
+name = "dsh-ui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+dsh-common.workspace = true
+dsh-protocol.workspace = true
+dsh-daemon.workspace = true
+dsh-markdown.workspace = true
+dsh-core.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+gpui = { path = "D:/rust/zed-fluid/crates/gpui" }
+gpui_platform = { path = "D:/rust/zed-fluid/crates/gpui_platform" }
+
+[[bin]]
+name = "dsh-desktop"
+path = "src/main.rs"
