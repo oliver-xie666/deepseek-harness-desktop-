@@ -17,6 +17,7 @@ Write-Host "📦 Packaging binary and configuration..." -ForegroundColor Yellow
 Copy-Item "target\release\dsh-desktop.exe" $DistDir
 Copy-Item "README.md" $DistDir
 Copy-Item "DESIGN.md" $DistDir
+Copy-Item -Recurse "crates\dsh-ui\assets" "$DistDir\assets"
 
 $ZipPath = "target\dist\DeepSeek-Harness-Desktop-Windows-x64.zip"
 if (Test-Path $ZipPath) {

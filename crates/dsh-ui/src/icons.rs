@@ -2,27 +2,37 @@
 //! element. Each glyph is an alpha mask tinted by `color` (the `currentColor`
 //! semantics of the upstream `dsh-client-ui-primitives` icon set), so a single
 //! color argument reproduces the exact same look as the web UI.
+//!
+//! Assets resolve at runtime: prefer a sibling `assets/` directory next to the
+//! executable (packaged layout), falling back to the source tree during
+//! `cargo run`. Call [`init_assets`] once at startup to pick the packaged dir.
 
 use gpui::{prelude::*, px, svg, Hsla, IntoElement};
+use std::path::PathBuf;
+use std::sync::OnceLock;
 
-const FISH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/fish.svg");
-const FOLDER_CLOSE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/folder_close.svg");
-const FOLDER_OPEN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/folder_open.svg");
-const CHEVRON_DOWN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/chevron_down.svg");
-const PLUS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/plus.svg");
-const AGENT_PRESET: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/agent_preset.svg");
-const NEW_CHAT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/new_chat.svg");
-const PANEL_LEFT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/panel_left.svg");
-const SETTINGS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/settings.svg");
-const CHECK: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/check.svg");
-const GLOW: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/glow.svg");
-const DATA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/data.svg");
-const CLOSE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/close.svg");
+static ASSET_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Set the packaged assets directory. Call once at startup when an
+/// executable-relative `assets/` directory exists; otherwise the source-tree
+/// fallback is used automatically.
+pub fn init_assets(dir: PathBuf) {
+    let _ = ASSET_DIR.set(dir);
+}
+
+/// Resolve an asset filename to a loadable path.
+fn asset(name: &str) -> String {
+    if let Some(dir) = ASSET_DIR.get() {
+        dir.join(name).to_string_lossy().into_owned()
+    } else {
+        format!("{}/assets/{}", env!("CARGO_MANIFEST_DIR"), name)
+    }
+}
 
 /// The DeepSeek whale/fish mark (native 23.16×17.04, rendered width×height).
 pub fn fish(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
     svg()
-        .external_path(FISH)
+        .external_path(asset("fish.svg"))
         .text_color(color)
         .w(px(size))
         .h(px(size * 17.04 / 23.16))
@@ -31,7 +41,7 @@ pub fn fish(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
 /// Closed-folder glyph (workspace placeholder / picker rows).
 pub fn folder_close(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
     svg()
-        .external_path(FOLDER_CLOSE)
+        .external_path(asset("folder_close.svg"))
         .text_color(color)
         .w(px(size))
         .h(px(size))
@@ -40,7 +50,7 @@ pub fn folder_close(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
 /// Open-folder glyph (selected workspace chip), duotone inner fill included.
 pub fn folder_open(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
     svg()
-        .external_path(FOLDER_OPEN)
+        .external_path(asset("folder_open.svg"))
         .text_color(color)
         .w(px(size))
         .h(px(size))
@@ -49,7 +59,7 @@ pub fn folder_open(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
 /// Downward chevron for select chips.
 pub fn chevron_down(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
     svg()
-        .external_path(CHEVRON_DOWN)
+        .external_path(asset("chevron_down.svg"))
         .text_color(color)
         .w(px(size))
         .h(px(size))
@@ -58,7 +68,7 @@ pub fn chevron_down(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
 /// Plus glyph ("add workspace" footer entry).
 pub fn plus(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
     svg()
-        .external_path(PLUS)
+        .external_path(asset("plus.svg"))
         .text_color(color)
         .w(px(size))
         .h(px(size))
@@ -67,7 +77,7 @@ pub fn plus(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
 /// Agent-preset glyph (the new-session mode selector).
 pub fn agent_preset(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
     svg()
-        .external_path(AGENT_PRESET)
+        .external_path(asset("agent_preset.svg"))
         .text_color(color)
         .w(px(size))
         .h(px(size))
@@ -76,7 +86,7 @@ pub fn agent_preset(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
 /// New-session chat glyph.
 pub fn new_chat(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
     svg()
-        .external_path(NEW_CHAT)
+        .external_path(asset("new_chat.svg"))
         .text_color(color)
         .w(px(size))
         .h(px(size))
@@ -85,7 +95,7 @@ pub fn new_chat(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
 /// Left-panel glyph (sidebar collapse/expand toggle).
 pub fn panel_left(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
     svg()
-        .external_path(PANEL_LEFT)
+        .external_path(asset("panel_left.svg"))
         .text_color(color)
         .w(px(size))
         .h(px(size))
@@ -94,7 +104,7 @@ pub fn panel_left(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
 /// Settings gear glyph.
 pub fn settings(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
     svg()
-        .external_path(SETTINGS)
+        .external_path(asset("settings.svg"))
         .text_color(color)
         .w(px(size))
         .h(px(size))
@@ -103,7 +113,7 @@ pub fn settings(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
 /// Check glyph (trailing selection marker in picker rows).
 pub fn check(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
     svg()
-        .external_path(CHECK)
+        .external_path(asset("check.svg"))
         .text_color(color)
         .w(px(size))
         .h(px(size))
@@ -112,7 +122,7 @@ pub fn check(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
 /// The soft blue hero backdrop ellipse (native 1051×468).
 pub fn glow(width: f32, height: f32, color: impl Into<Hsla>) -> impl IntoElement {
     svg()
-        .external_path(GLOW)
+        .external_path(asset("glow.svg"))
         .text_color(color)
         .w(px(width))
         .h(px(height))
@@ -121,7 +131,7 @@ pub fn glow(width: f32, height: f32, color: impl Into<Hsla>) -> impl IntoElement
 /// Database glyph (models settings nav row).
 pub fn data(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
     svg()
-        .external_path(DATA)
+        .external_path(asset("data.svg"))
         .text_color(color)
         .w(px(size))
         .h(px(size))
@@ -130,7 +140,7 @@ pub fn data(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
 /// Close glyph (settings panel close button).
 pub fn close(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
     svg()
-        .external_path(CLOSE)
+        .external_path(asset("close.svg"))
         .text_color(color)
         .w(px(size))
         .h(px(size))

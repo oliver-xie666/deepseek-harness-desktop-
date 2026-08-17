@@ -46,6 +46,19 @@ fn main() {
     let args = CliArgs::parse();
     init_logging();
 
+    // Resolve icon assets relative to the executable when packaged (a sibling
+    // `assets/` directory); during `cargo run` the source-tree fallback in the
+    // icons module is used instead.
+    if let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.to_path_buf()))
+    {
+        let candidate = exe_dir.join("assets");
+        if candidate.is_dir() {
+            crate::icons::init_assets(candidate);
+        }
+    }
+
     info!(
         "Starting DeepSeek Harness 100% Pure Rust + GPUI Desktop (workspace: {}, mock: {})...",
         args.workspace.display(),
