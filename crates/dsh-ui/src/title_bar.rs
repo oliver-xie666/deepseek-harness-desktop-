@@ -4,6 +4,7 @@ pub struct TitleBar {
     pub workspace_name: String,
     pub active_model: String,
     pub is_connected: bool,
+    pub on_toggle_settings: Option<Box<dyn Fn(&mut Window, &mut Context<Self>) + 'static>>,
 }
 
 impl TitleBar {
@@ -12,6 +13,7 @@ impl TitleBar {
             workspace_name: workspace.to_string(),
             active_model: model.to_string(),
             is_connected,
+            on_toggle_settings: None,
         }
     }
 }
@@ -25,81 +27,146 @@ impl Render for TitleBar {
         };
 
         div()
-            .h_9()
+            .h_10()
             .w_full()
-            .bg(rgb(0x18181b))
+            .bg(rgb(0x13151b))
             .border_b_1()
-            .border_color(rgb(0x27272a))
+            .border_color(rgb(0x23262d))
             .flex()
             .items_center()
             .justify_between()
             .px_3()
+            // Left: DeepSeek Brand & Workspace
             .child(
-                // Left: Logo & App Name
                 div()
                     .flex()
                     .items_center()
-                    .gap_2()
+                    .gap_2p5()
+                    .child(
+                        div()
+                            .text_base()
+                            .child("🐳"),
+                    )
                     .child(
                         div()
                             .text_sm()
                             .font_weight(FontWeight::BOLD)
-                            .text_color(rgb(0x38bdf8))
-                            .child("⚡ DeepSeek Harness"),
+                            .text_color(rgb(0x4176e6))
+                            .child("DeepSeek Harness"),
                     )
                     .child(
                         div()
                             .text_xs()
-                            .text_color(rgb(0x71717a))
-                            .child(format!("• {}", self.workspace_name)),
+                            .text_color(rgb(0x61666b))
+                            .child("/"),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(0x979da6))
+                            .child(format!("📁 {}", self.workspace_name)),
                     ),
             )
+            // Center: Draggable Window Region
             .child(
-                // Center / Right Controls
+                div()
+                    .flex_1()
+                    .h_full()
+                    .cursor_default()
+                    .on_mouse_down(gpui::MouseButton::Left, |_, window, _| {
+                        window.start_window_move();
+                    }),
+            )
+            // Right: Status, Model, Settings & Window Controls
+            .child(
                 div()
                     .flex()
                     .items_center()
                     .gap_3()
-                    // Active Model Badge
+                    // Active Model Tag
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .gap_1p5()
                             .px_2p5()
-                            .py_0p5()
+                            .py_1()
                             .rounded_md()
-                            .bg(rgb(0x27272a))
+                            .bg(rgb(0x1f2228))
                             .border_1()
-                            .border_color(rgb(0x3f3f46))
+                            .border_color(rgb(0x2c2c2e))
                             .text_xs()
+                            .font_weight(FontWeight::MEDIUM)
                             .text_color(rgb(0xe4e4e7))
                             .child("🤖")
                             .child(self.active_model.clone()),
                     )
-                    // Daemon Status Indicator
+                    // Daemon Status
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .gap_1p5()
                             .text_xs()
-                            .text_color(rgb(0xa1a1aa))
+                            .text_color(rgb(0x979da6))
                             .child(div().size_2().rounded_full().bg(status_color))
-                            .child(if self.is_connected { "Daemon: Online" } else { "Daemon: Disconnected" }),
+                            .child(if self.is_connected { "Online" } else { "Disconnected" }),
                     )
                     // Settings Button
                     .child(
                         div()
-                            .px_2()
-                            .py_0p5()
+                            .px_2p5()
+                            .py_1()
                             .rounded_md()
-                            .bg(rgb(0x27272a))
-                            .hover(|s| s.bg(rgb(0x3f3f46)))
+                            .bg(rgb(0x1f2228))
+                            .hover(|s| s.bg(rgb(0x282c34)))
+                            .border_1()
+                            .border_color(rgb(0x2c2c2e))
                             .text_xs()
                             .text_color(rgb(0xe4e4e7))
                             .cursor_pointer()
+                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation();
+                            })
                             .child("⚙️ Settings"),
+                    )
+                    // Divider
+                    .child(div().w_px().h_4().bg(rgb(0x2c2c2e)))
+                    // Window Control: Minimize & Close
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .size_6()
+                                    .rounded_md()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .text_xs()
+                                    .text_color(rgb(0x979da6))
+                                    .hover(|s| s.bg(rgb(0x282c34)).text_color(rgb(0xffffff)))
+                                    .cursor_pointer()
+                                    .child("─"),
+                            )
+                            .child(
+                                div()
+                                    .size_6()
+                                    .rounded_md()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .text_xs()
+                                    .text_color(rgb(0x979da6))
+                                    .hover(|s| s.bg(rgb(0xef4444)).text_color(rgb(0xffffff)))
+                                    .cursor_pointer()
+                                    .on_mouse_down(gpui::MouseButton::Left, |_, window, _| {
+                                        window.remove_window();
+                                    })
+                                    .child("✕"),
+                            ),
                     ),
             )
     }

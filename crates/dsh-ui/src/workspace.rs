@@ -39,13 +39,13 @@ impl Render for WorkspaceView {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .size_full()
-            .bg(rgb(0x09090b))
+            .bg(rgb(0x0f1115))
             .flex()
             .flex_col()
             .relative()
             // Top Title Bar
             .child(self.title_bar.clone())
-            // Main Three-Pane Body
+            // Main Three-Pane Body (AppFrame)
             .child(
                 div()
                     .flex_1()
