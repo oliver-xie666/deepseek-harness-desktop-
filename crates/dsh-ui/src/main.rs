@@ -1,5 +1,6 @@
 mod chat_view;
 mod diff_panel;
+mod settings_modal;
 mod sidebar;
 mod title_bar;
 mod workspace;

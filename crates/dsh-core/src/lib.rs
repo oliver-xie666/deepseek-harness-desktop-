@@ -1,5 +1,7 @@
+pub mod config;
 pub mod diff_applier;
 pub mod fs_tree;
+pub mod mcp;
 pub mod persistence;
 pub mod ws_client;
 
@@ -16,8 +18,10 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 
+pub use config::{AppConfig, ModelConfig, ProviderType, UiConfig};
 pub use diff_applier::DiffApplier;
 pub use fs_tree::{FileNode, WorkspaceScanner};
+pub use mcp::{McpRegistry, McpServerConfig, McpTransport};
 pub use persistence::SessionPersistence;
 pub use ws_client::HarnessWsClient;
 
@@ -71,6 +75,8 @@ pub struct AppState {
     pub active_session_id: RwLock<Option<String>>,
     pub sessions: RwLock<HashMap<String, Session>>,
     pub daemon_manager: Arc<DaemonManager>,
+    pub config: RwLock<AppConfig>,
+    pub mcp_servers: RwLock<Vec<McpServerConfig>>,
     pub outbox_tx: mpsc::Sender<HarnessClientMessage>,
 }
 
@@ -78,12 +84,17 @@ impl AppState {
     pub fn new(daemon_config: DaemonConfig) -> (Arc<Self>, mpsc::Receiver<HarnessClientMessage>) {
         let (outbox_tx, outbox_rx) = mpsc::channel(100);
         let daemon_manager = Arc::new(DaemonManager::new(daemon_config));
+        let data_dir = AppPaths::data_dir();
+        let config = AppConfig::load_or_default(&data_dir);
+        let mcp_servers = McpRegistry::load_servers(&data_dir);
 
         let state = Arc::new(Self {
             workspace_path: RwLock::new(PathBuf::from(".")),
             active_session_id: RwLock::new(None),
             sessions: RwLock::new(HashMap::new()),
             daemon_manager,
+            config: RwLock::new(config),
+            mcp_servers: RwLock::new(mcp_servers),
             outbox_tx,
         });
 
