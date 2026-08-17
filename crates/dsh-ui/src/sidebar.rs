@@ -11,7 +11,7 @@ pub struct SessionItemView {
 pub struct Sidebar {
     pub file_tree: Option<FileNode>,
     pub sessions: Vec<SessionItemView>,
-    pub mcp_tools: Vec<String>,
+    pub active_workspace: String,
 }
 
 impl Default for Sidebar {
@@ -26,29 +26,8 @@ impl Sidebar {
 
         Self {
             file_tree: tree,
-            sessions: vec![
-                SessionItemView {
-                    id: "1".into(),
-                    title: "🚀 Project Scaffolding".into(),
-                    is_active: true,
-                },
-                SessionItemView {
-                    id: "2".into(),
-                    title: "🔧 Fix WebSocket Reconnect".into(),
-                    is_active: false,
-                },
-                SessionItemView {
-                    id: "3".into(),
-                    title: "🎨 Markdown Syntax Theme".into(),
-                    is_active: false,
-                },
-            ],
-            mcp_tools: vec![
-                "filesystem".into(),
-                "terminal".into(),
-                "git".into(),
-                "browser".into(),
-            ],
+            sessions: Vec::new(),
+            active_workspace: "deepseek-harness-desktop".into(),
         }
     }
 
@@ -68,43 +47,11 @@ impl Sidebar {
             0,
             SessionItemView {
                 id: new_id,
-                title: "💬 New Session".into(),
+                title: "新会话".into(),
                 is_active: true,
             },
         );
         cx.notify();
-    }
-
-    fn render_file_node(&self, node: &FileNode, depth: usize) -> impl IntoElement {
-        let indent = depth * 12;
-        let icon = node.icon.clone();
-        let name = node.name.clone();
-        let is_dir = node.is_dir;
-
-        div()
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_1p5()
-                    .py_1()
-                    .px_2()
-                    .rounded_md()
-                    .hover(|s| s.bg(rgb(0x1f2228)))
-                    .cursor_pointer()
-                    .text_xs()
-                    .text_color(if is_dir { rgb(0xf4f4f5) } else { rgb(0x979da6) })
-                    .child(div().w(gpui::px(indent as f32)))
-                    .child(div().child(icon))
-                    .child(div().child(name)),
-            )
-            .children(
-                node.children
-                    .iter()
-                    .map(move |child| self.render_file_node(child, depth + 1)),
-            )
     }
 }
 
@@ -114,113 +61,59 @@ impl Render for Sidebar {
             this.add_new_session(cx);
         });
 
-        let file_nodes: Vec<_> = self
-            .file_tree
-            .as_ref()
-            .map(|tree| {
-                tree.children
-                    .iter()
-                    .map(|child| self.render_file_node(child, 0))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let has_sessions = !self.sessions.is_empty();
 
         div()
             .w_64()
             .h_full()
-            .bg(rgb(0x0f1115))
+            .bg(rgb(0x111215))
             .border_r_1()
-            .border_color(rgb(0x1f2228))
+            .border_color(rgb(0x1a1c22))
             .flex()
             .flex_col()
+            .justify_between()
             .p_3()
-            .gap_3()
             .overflow_hidden()
-            // New Session Action Button (Official DeepSeek Blue)
+            // Top Section
             .child(
                 div()
-                    .w_full()
-                    .py_2()
-                    .px_3()
-                    .rounded_lg()
-                    .bg(rgb(0x4176e6))
-                    .hover(|s| s.bg(rgb(0x4d93f8)))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap_2()
-                    .text_sm()
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(rgb(0xffffff))
-                    .cursor_pointer()
-                    .on_mouse_down(gpui::MouseButton::Left, handle_new_chat)
-                    .child("+ New Session"),
-            )
-            // Section 1: Workspaces & File Explorer
-            .child(
-                div()
-                    .flex_1()
                     .flex()
                     .flex_col()
-                    .gap_1p5()
-                    .overflow_hidden()
+                    .gap_3()
+                    // ⊕ 新会话 (Dark Rounded Pill #212328)
+                    .child(
+                        div()
+                            .w_full()
+                            .py_2()
+                            .px_3()
+                            .rounded_xl()
+                            .bg(rgb(0x212328))
+                            .hover(|s| s.bg(rgb(0x2a2d35)))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .gap_2()
+                            .text_xs()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(rgb(0xe4e4e7))
+                            .cursor_pointer()
+                            .on_mouse_down(gpui::MouseButton::Left, handle_new_chat)
+                            .child("⊕ 新会话"),
+                    )
+                    // 工作区 Header + 🔍 ⇋ ⎘+
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .justify_between()
+                            .px_1()
                             .child(
                                 div()
                                     .text_xs()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(rgb(0x61666b))
-                                    .child("WORKSPACE FILES"),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .overflow_hidden()
-                            .flex()
-                            .flex_col()
-                            .children(file_nodes),
-                    ),
-            )
-            // Divider
-            .child(div().h_px().bg(rgb(0x1f2228)))
-            // Section 2: Recent Sessions
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(rgb(0x61666b))
-                            .child("RECENT SESSIONS"),
-                    )
-                    .children(self.sessions.iter().map(|sess| {
-                        let is_act = sess.is_active;
-                        let bg = if is_act { rgb(0x1f2228) } else { rgb(0x0f1115) };
-                        let fg = if is_act { rgb(0xffffff) } else { rgb(0x979da6) };
-                        let sess_id = sess.id.clone();
-                        let handle_click = cx.listener(move |this, _, _, cx| {
-                            this.select_session(&sess_id, cx);
-                        });
-
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .px_2p5()
-                            .py_1p5()
-                            .rounded_md()
-                            .bg(bg)
-                            .hover(|s| s.bg(rgb(0x1f2228)))
-                            .cursor_pointer()
-                            .on_mouse_down(gpui::MouseButton::Left, handle_click)
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(rgb(0x979da6))
+                                    .child("工作区"),
+                            )
                             .child(
                                 div()
                                     .flex()
@@ -229,44 +122,86 @@ impl Render for Sidebar {
                                     .child(
                                         div()
                                             .text_xs()
-                                            .font_weight(if is_act { FontWeight::MEDIUM } else { FontWeight::NORMAL })
-                                            .text_color(fg)
-                                            .child(sess.title.clone()),
+                                            .text_color(rgb(0x61666b))
+                                            .hover(|s| s.text_color(rgb(0xffffff)))
+                                            .cursor_pointer()
+                                            .child("🔍"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(rgb(0x61666b))
+                                            .hover(|s| s.text_color(rgb(0xffffff)))
+                                            .cursor_pointer()
+                                            .child("⇋"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(rgb(0x61666b))
+                                            .hover(|s| s.text_color(rgb(0xffffff)))
+                                            .cursor_pointer()
+                                            .child("⎘+"),
                                     ),
-                            )
-                    })),
+                            ),
+                    )
+                    // Sessions List or 暂无会话
+                    .child(
+                        if has_sessions {
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .children(self.sessions.iter().map(|sess| {
+                                    let is_act = sess.is_active;
+                                    let bg = if is_act { rgb(0x212328) } else { rgb(0x111215) };
+                                    let fg = if is_act { rgb(0xffffff) } else { rgb(0x979da6) };
+                                    let sess_id = sess.id.clone();
+                                    let handle_click = cx.listener(move |this, _, _, cx| {
+                                        this.select_session(&sess_id, cx);
+                                    });
+
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .px_2p5()
+                                        .py_1p5()
+                                        .rounded_lg()
+                                        .bg(bg)
+                                        .hover(|s| s.bg(rgb(0x212328)))
+                                        .cursor_pointer()
+                                        .on_mouse_down(gpui::MouseButton::Left, handle_click)
+                                        .text_xs()
+                                        .text_color(fg)
+                                        .child(sess.title.clone())
+                                }))
+                                .into_any_element()
+                        } else {
+                            div()
+                                .px_1()
+                                .py_2()
+                                .text_xs()
+                                .text_color(rgb(0x61666b))
+                                .child("暂无会话")
+                                .into_any_element()
+                        }
+                    ),
             )
-            // Divider
-            .child(div().h_px().bg(rgb(0x1f2228)))
-            // Section 3: Active MCP Tools Foot
+            // Bottom Section: ⚙ 设置
             .child(
                 div()
                     .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(rgb(0x61666b))
-                            .child("ACTIVE MCP TOOLS"),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .children(self.mcp_tools.iter().map(|tool| {
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_1p5()
-                                    .text_xs()
-                                    .text_color(rgb(0x979da6))
-                                    .child(div().size_1p5().rounded_full().bg(rgb(0x4176e6)))
-                                    .child(tool.clone())
-                            })),
-                    ),
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_2()
+                    .rounded_lg()
+                    .hover(|s| s.bg(rgb(0x1a1c22)))
+                    .cursor_pointer()
+                    .text_xs()
+                    .text_color(rgb(0x979da6))
+                    .child("⚙")
+                    .child("设置"),
             )
     }
 }

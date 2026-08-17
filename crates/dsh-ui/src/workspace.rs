@@ -18,7 +18,7 @@ pub struct WorkspaceView {
 
 impl WorkspaceView {
     pub fn new(state: Entity<Arc<AppState>>, cx: &mut Context<Self>) -> Self {
-        let title_bar = cx.new(|_| TitleBar::new("deepseek-harness-desktop", "DeepSeek-V3", true));
+        let title_bar = cx.new(|_| TitleBar::new("deepseek-harness-desktop"));
         let sidebar = cx.new(|_| Sidebar::new());
         let details_drawer = cx.new(|_| DetailsDrawer::new());
         let chat_view = cx.new(|cx| ChatView::new(state.clone(), details_drawer.clone(), cx));
@@ -39,7 +39,7 @@ impl Render for WorkspaceView {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .size_full()
-            .bg(rgb(0x0f1115))
+            .bg(rgb(0x0d0f12))
             .flex()
             .flex_col()
             .relative()

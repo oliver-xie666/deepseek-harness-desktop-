@@ -2,6 +2,7 @@ mod chat_view;
 mod details_drawer;
 mod settings_modal;
 mod sidebar;
+mod text_input;
 mod title_bar;
 pub mod workspace;
 
@@ -98,7 +99,7 @@ fn main() {
             show: true,
             kind: gpui::WindowKind::Normal,
             is_movable: true,
-            app_owns_titlebar_drag: true,
+            app_owns_titlebar_drag: false, // Critical for Windows native dragging
             display_id: None,
             window_background: gpui::WindowBackgroundAppearance::Opaque,
             ..Default::default()
