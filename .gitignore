@@ -1,0 +1,20 @@
+# Rust build artifacts
+target/
+**/*.rs.bk
+Cargo.lock
+
+# Node.js / Subprocess bundle artifacts
+node_modules/
+dist/
+build/
+*.log
+
+# IDE & OS files
+.idea/
+.vscode/
+*.swp
+*.DS_Store
+Thumbs.db
+
+# Embedded runtime local extractions
+resources/runtime/extracted/
