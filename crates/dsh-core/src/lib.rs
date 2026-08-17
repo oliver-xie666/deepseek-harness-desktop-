@@ -1,3 +1,5 @@
+pub mod ws_client;
+
 use chrono::{DateTime, Utc};
 use dsh_common::Result;
 use dsh_daemon::{DaemonConfig, DaemonManager};
@@ -10,6 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
+pub use ws_client::HarnessWsClient;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -80,6 +83,16 @@ impl AppState {
         (state, outbox_rx)
     }
 
+    pub fn start_background_client(
+        state: Arc<Self>,
+        outbox_rx: mpsc::Receiver<HarnessClientMessage>,
+    ) -> Arc<HarnessWsClient> {
+        let ws_url = state.daemon_manager.ws_url();
+        let client = Arc::new(HarnessWsClient::new(&ws_url, state.clone()));
+        client.clone().start(outbox_rx);
+        client
+    }
+
     pub async fn create_session(&self, title: &str, workspace: &str) -> String {
         let session_id = Uuid::new_v4().to_string();
         let session = Session {
@@ -137,7 +150,6 @@ impl AppState {
                             return;
                         }
                     }
-                    // Create new assistant message
                     session.messages.push(ChatMessage {
                         id: message_id,
                         sender: MessageSender::Assistant,
@@ -243,5 +255,33 @@ mod tests {
         let session = sessions.get(&session_id).unwrap();
         assert_eq!(session.messages.len(), 1);
         assert_eq!(session.messages[0].content, "Hello");
+    }
+
+    #[tokio::test]
+    async fn test_end_to_end_ws_client_mock() {
+        let port = dsh_daemon::DaemonManager::find_available_port(3700, 3800).unwrap();
+        let config = DaemonConfig {
+            port,
+            use_embedded_mock: true,
+            ..Default::default()
+        };
+
+        let (state, outbox_rx) = AppState::new(config);
+        state.daemon_manager.start().await.unwrap();
+
+        let session_id = state.create_session("Mock Chat", "/tmp").await;
+        let _client = AppState::start_background_client(state.clone(), outbox_rx);
+
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        // Send a prompt
+        state.add_user_message(&session_id, "Hello Rust").await.unwrap();
+
+        // Wait for mock stream response
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        let sessions = state.sessions.read().await;
+        let session = sessions.get(&session_id).unwrap();
+        assert!(session.messages.len() >= 2); // 1 User + 1 Assistant
     }
 }

@@ -1,52 +1,38 @@
+use dsh_core::AppState;
 use dsh_markdown::{CodeHighlighter, InlineSpan, MarkdownBlock, StreamingMarkdownParser, TokenType};
-use gpui::{div, prelude::*, rgb, Context, FontWeight, IntoElement, Window};
-
-pub struct ChatMessageView {
-    pub is_user: bool,
-    pub content: String,
-    pub tool_calls: Vec<ToolCallView>,
-}
-
-pub struct ToolCallView {
-    pub name: String,
-    pub status: String,
-    pub duration_ms: u64,
-}
+use gpui::{div, prelude::*, rgb, Context, Entity, FontWeight, IntoElement, Window};
+use std::sync::Arc;
 
 pub struct ChatView {
-    pub messages: Vec<ChatMessageView>,
-    pub input_text: String,
-}
-
-impl Default for ChatView {
-    fn default() -> Self {
-        Self::new()
-    }
+    pub state: Entity<Arc<AppState>>,
+    pub prompt_draft: String,
 }
 
 impl ChatView {
-    pub fn new() -> Self {
+    pub fn new(state: Entity<Arc<AppState>>, _cx: &mut Context<Self>) -> Self {
         Self {
-            messages: vec![
-                ChatMessageView {
-                    is_user: true,
-                    content: "请帮我用 Rust + GPUI 重构 DeepSeek Harness 的桌面端，并支持 Markdown 语法高亮。".into(),
-                    tool_calls: vec![],
-                },
-                ChatMessageView {
-                    is_user: false,
-                    content: "已经为您规划并创建了完整的 Cargo Workspace 架构！以下是核心协议定义：\n\n```rust\npub enum HarnessServerEvent {\n    TokenChunk { text: String },\n    ToolCallStart { name: String },\n}\n```\n\n> [!TIP]\n> GPUI 渲染引擎可达到 120 FPS 极速刷新，内存开销极低。".into(),
-                    tool_calls: vec![
-                        ToolCallView {
-                            name: "cargo_check".into(),
-                            status: "success".into(),
-                            duration_ms: 320,
-                        },
-                    ],
-                },
-            ],
-            input_text: String::new(),
+            state,
+            prompt_draft: "请帮我用 Rust + GPUI 重构 DeepSeek Harness 桌面端".to_string(),
         }
+    }
+
+    pub fn send_prompt(&mut self, _cx: &mut Context<Self>) {
+        let text = self.prompt_draft.clone();
+        if text.trim().is_empty() {
+            return;
+        }
+
+        let state_arc = self.state.read(_cx).clone();
+        tokio::spawn(async move {
+            let session_id = {
+                let active_opt = state_arc.active_session_id.read().await.clone();
+                match active_opt {
+                    Some(id) => id,
+                    None => state_arc.create_session("New Session", ".").await,
+                }
+            };
+            let _ = state_arc.add_user_message(&session_id, &text).await;
+        });
     }
 
     fn render_markdown_block(&self, block: MarkdownBlock) -> impl IntoElement {
@@ -110,7 +96,6 @@ impl ChatView {
                     .border_color(rgb(0x27272a))
                     .flex()
                     .flex_col()
-                    // Code header
                     .child(
                         div()
                             .flex()
@@ -129,17 +114,16 @@ impl ChatView {
                                     .child("📋 Copy"),
                             ),
                     )
-                    // Code content
                     .child(
                         div().p_3().text_xs().flex().flex_col().children(
                             spans.into_iter().map(|span| {
                                 let color = match span.token_type {
-                                    TokenType::Keyword => rgb(0xf43f5e),  // rose
-                                    TokenType::Function => rgb(0x38bdf8), // sky
-                                    TokenType::Type => rgb(0xfbbf24),     // amber
-                                    TokenType::String => rgb(0x4ade80),   // green
-                                    TokenType::Comment => rgb(0x71717a),  // zinc
-                                    TokenType::Number => rgb(0xc084fc),   // purple
+                                    TokenType::Keyword => rgb(0xf43f5e),
+                                    TokenType::Function => rgb(0x38bdf8),
+                                    TokenType::Type => rgb(0xfbbf24),
+                                    TokenType::String => rgb(0x4ade80),
+                                    TokenType::Comment => rgb(0x71717a),
+                                    TokenType::Number => rgb(0xc084fc),
                                     _ => rgb(0xe4e4e7),
                                 };
                                 div().text_color(color).child(span.text)
@@ -174,6 +158,8 @@ impl ChatView {
 
 impl Render for ChatView {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let prompt_preview = self.prompt_draft.clone();
+
         div()
             .flex_1()
             .h_full()
@@ -190,56 +176,57 @@ impl Render for ChatView {
                     .flex()
                     .flex_col()
                     .gap_4()
-                    .children(self.messages.iter().map(|msg| {
-                        if msg.is_user {
-                            div()
-                                .flex()
-                                .justify_end()
-                                .child(
-                                    div()
-                                        .max_w_3_4()
-                                        .p_3()
-                                        .rounded_lg()
-                                        .bg(rgb(0x2563eb))
-                                        .text_sm()
-                                        .text_color(rgb(0xffffff))
-                                        .child(msg.content.clone()),
+                    .child(
+                        div()
+                            .flex()
+                            .justify_end()
+                            .child(
+                                div()
+                                    .max_w_3_4()
+                                    .p_3()
+                                    .rounded_lg()
+                                    .bg(rgb(0x2563eb))
+                                    .text_sm()
+                                    .text_color(rgb(0xffffff))
+                                    .child(prompt_preview),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .max_w_full()
+                            .p_4()
+                            .rounded_lg()
+                            .bg(rgb(0x141417))
+                            .border_1()
+                            .border_color(rgb(0x27272a))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .px_2p5()
+                                    .py_1()
+                                    .rounded_md()
+                                    .bg(rgb(0x1e1e24))
+                                    .border_1()
+                                    .border_color(rgb(0x3f3f46))
+                                    .text_xs()
+                                    .text_color(rgb(0xa1a1aa))
+                                    .child("🔧")
+                                    .child("grep_search (100ms)")
+                                    .child("✓"),
+                            )
+                            .children(
+                                StreamingMarkdownParser::parse_markdown(
+                                    "正在实时连接 DeepSeek Harness 守护进程...\n\n```rust\npub async fn run_agent() {\n    println!(\"120 FPS Realtime Agent Stream!\");\n}\n```\n\n> [!TIP]\n> WebSocket IPC 已成功建立双向数据通路！",
                                 )
-                        } else {
-                            let blocks = StreamingMarkdownParser::parse_markdown(&msg.content);
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap_2()
-                                .max_w_full()
-                                .p_4()
-                                .rounded_lg()
-                                .bg(rgb(0x141417))
-                                .border_1()
-                                .border_color(rgb(0x27272a))
-                                // Tool call cards
-                                .children(msg.tool_calls.iter().map(|tc| {
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap_2()
-                                        .px_2p5()
-                                        .py_1()
-                                        .rounded_md()
-                                        .bg(rgb(0x1e1e24))
-                                        .border_1()
-                                        .border_color(rgb(0x3f3f46))
-                                        .text_xs()
-                                        .text_color(rgb(0xa1a1aa))
-                                        .child("🔧")
-                                        .child(tc.name.clone())
-                                        .child(format!("({}ms)", tc.duration_ms))
-                                        .child("✓")
-                                }))
-                                // Markdown blocks
-                                .children(blocks.into_iter().map(|b| self.render_markdown_block(b)))
-                        }
-                    })),
+                                .into_iter()
+                                .map(|b| self.render_markdown_block(b)),
+                            ),
+                    ),
             )
             // Bottom Prompt Input Bar
             .child(
@@ -261,7 +248,7 @@ impl Render for ChatView {
                             .border_1()
                             .border_color(rgb(0x27272a))
                             .text_sm()
-                            .text_color(rgb(0xa1a1aa))
+                            .text_color(rgb(0xe4e4e7))
                             .child("输入指令，按 Enter 发送，或键入 @ 引用代码..."),
                     )
                     .child(
@@ -274,6 +261,9 @@ impl Render for ChatView {
                             .font_weight(FontWeight::BOLD)
                             .text_color(rgb(0xffffff))
                             .cursor_pointer()
+                            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation();
+                            })
                             .child("发送 ⏎"),
                     ),
             )
