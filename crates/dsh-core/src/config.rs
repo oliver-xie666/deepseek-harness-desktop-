@@ -49,7 +49,7 @@ pub struct UiConfig {
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
-            theme: "dark".to_string(),
+            theme: "light".to_string(),
             font_size: 14,
             show_diff_panel: true,
             show_sidebar: true,

@@ -19,19 +19,11 @@ pub enum HarnessClientMessage {
         attachments: Vec<String>,
     },
     /// Cancel in-flight generation
-    CancelExecution {
-        session_id: String,
-    },
+    CancelExecution { session_id: String },
     /// User accepts generated file diff
-    AcceptDiff {
-        session_id: String,
-        diff_id: String,
-    },
+    AcceptDiff { session_id: String, diff_id: String },
     /// User rejects generated file diff
-    RejectDiff {
-        session_id: String,
-        diff_id: String,
-    },
+    RejectDiff { session_id: String, diff_id: String },
     /// Ping daemon for health status
     Ping,
 }
@@ -87,10 +79,7 @@ pub enum HarnessServerEvent {
     /// Pong health response
     Pong,
     /// Error notification
-    Error {
-        code: String,
-        message: String,
-    },
+    Error { code: String, message: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

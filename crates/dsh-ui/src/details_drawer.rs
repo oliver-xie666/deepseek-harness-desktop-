@@ -25,7 +25,14 @@ impl DetailsDrawer {
         }
     }
 
-    pub fn open_tool(&mut self, name: &str, duration_ms: u64, args: &str, output: &str, cx: &mut Context<Self>) {
+    pub fn open_tool(
+        &mut self,
+        name: &str,
+        duration_ms: u64,
+        args: &str,
+        output: &str,
+        cx: &mut Context<Self>,
+    ) {
         self.tool_name = name.to_string();
         self.duration_ms = duration_ms;
         self.args_json = args.to_string();
@@ -53,9 +60,9 @@ impl Render for DetailsDrawer {
         div()
             .w_80()
             .h_full()
-            .bg(rgb(0x15171b))
+            .bg(rgb(0xffffff))
             .border_l_1()
-            .border_color(rgb(0x23262d))
+            .border_color(rgb(0xe5e7eb))
             .flex()
             .flex_col()
             .overflow_hidden()
@@ -68,8 +75,8 @@ impl Render for DetailsDrawer {
                     .px_4()
                     .py_3()
                     .border_b_1()
-                    .border_color(rgb(0x23262d))
-                    .bg(rgb(0x13151b))
+                    .border_color(rgb(0xe5e7eb))
+                    .bg(rgb(0xf9fafb))
                     .child(
                         div()
                             .flex()
@@ -80,7 +87,7 @@ impl Render for DetailsDrawer {
                                 div()
                                     .font_weight(FontWeight::BOLD)
                                     .text_xs()
-                                    .text_color(rgb(0xffffff))
+                                    .text_color(rgb(0x0f1115))
                                     .child(format!("{} ({}ms)", self.tool_name, self.duration_ms)),
                             ),
                     )
@@ -92,8 +99,8 @@ impl Render for DetailsDrawer {
                             .items_center()
                             .justify_center()
                             .text_xs()
-                            .text_color(rgb(0x979da6))
-                            .hover(|s| s.bg(rgb(0x1f2228)).text_color(rgb(0xffffff)))
+                            .text_color(rgb(0x81858c))
+                            .hover(|s| s.bg(rgb(0xf1f3f5)).text_color(rgb(0x0f1115)))
                             .cursor_pointer()
                             .on_mouse_down(gpui::MouseButton::Left, handle_close)
                             .child("✕"),
@@ -124,11 +131,11 @@ impl Render for DetailsDrawer {
                                 div()
                                     .p_2p5()
                                     .rounded_lg()
-                                    .bg(rgb(0x0f1115))
+                                    .bg(rgb(0xf5f6f8))
                                     .border_1()
-                                    .border_color(rgb(0x282c34))
+                                    .border_color(rgb(0xe1e5eb))
                                     .text_xs()
-                                    .text_color(rgb(0x4ade80))
+                                    .text_color(rgb(0x16a34a))
                                     .child(self.args_json.clone()),
                             ),
                     )
@@ -150,11 +157,11 @@ impl Render for DetailsDrawer {
                                     .flex_1()
                                     .p_2p5()
                                     .rounded_lg()
-                                    .bg(rgb(0x0f1115))
+                                    .bg(rgb(0xf5f6f8))
                                     .border_1()
-                                    .border_color(rgb(0x282c34))
+                                    .border_color(rgb(0xe1e5eb))
                                     .text_xs()
-                                    .text_color(rgb(0xe4e4e7))
+                                    .text_color(rgb(0x3f454d))
                                     .child(self.output_raw.clone()),
                             ),
                     ),

@@ -63,19 +63,19 @@ impl SettingsModal {
             .gap_0p5()
             .p_2()
             .child(nav_cell(
-                icons::settings(16.0, rgb(0x979da6)),
+                icons::settings(16.0, rgb(0x61666b)),
                 "通用设置",
                 active == SettingsTab::General,
                 handle_general,
             ))
             .child(nav_cell(
-                icons::data(16.0, rgb(0x979da6)),
+                icons::data(16.0, rgb(0x61666b)),
                 "模型",
                 active == SettingsTab::Models,
                 handle_models,
             ))
             .child(nav_cell(
-                icons::agent_preset(16.0, rgb(0x979da6)),
+                icons::agent_preset(16.0, rgb(0x61666b)),
                 "Agent 预设",
                 active == SettingsTab::AgentPresets,
                 handle_presets,
@@ -90,7 +90,7 @@ impl SettingsModal {
             .child(section_label("语言"))
             .child(field_row("显示语言", "简体中文"))
             .child(section_label("外观"))
-            .child(field_row("主题", "深色"))
+            .child(field_row("主题", "浅色"))
     }
 
     fn models_body(&self) -> impl IntoElement {
@@ -135,17 +135,17 @@ impl SettingsModal {
                     .gap_1()
                     .p_3()
                     .rounded_lg()
-                    .bg(rgb(0x191c22))
+                    .bg(rgb(0xf5f6f8))
                     .border_1()
-                    .border_color(rgb(0x282c34))
+                    .border_color(rgb(0xe1e5eb))
                     .child(
                         div()
                             .text_sm()
                             .font_weight(FontWeight::MEDIUM)
-                            .text_color(rgb(0xffffff))
+                            .text_color(rgb(0x0f1115))
                             .child(name),
                     )
-                    .child(div().text_xs().text_color(rgb(0x979da6)).child(desc))
+                    .child(div().text_xs().text_color(rgb(0x61666b)).child(desc))
             }))
     }
 }
@@ -169,23 +169,23 @@ impl Render for SettingsModal {
             .justify_center()
             .child(
                 div()
-                    .w(px(900.0))
+                    .w(px(800.0))
                     .h(px(620.0))
-                    .rounded_2xl()
-                    .bg(rgb(0x15171b))
+                    .rounded(px(24.0))
+                    .bg(rgb(0xffffff))
                     .border_1()
-                    .border_color(rgb(0x282c34))
+                    .border_color(rgb(0xe1e5eb))
                     .flex()
                     .overflow_hidden()
                     .shadow_lg()
                     // Left nav rail
                     .child(
                         div()
-                            .w_56()
+                            .w(px(188.0))
                             .h_full()
-                            .bg(rgb(0x13151b))
+                            .bg(rgb(0xf5f6f8))
                             .border_r_1()
-                            .border_color(rgb(0x23262d))
+                            .border_color(rgb(0xe5e7eb))
                             .flex()
                             .flex_col()
                             .child(
@@ -194,7 +194,7 @@ impl Render for SettingsModal {
                                     .py_4()
                                     .text_sm()
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(rgb(0xffffff))
+                                    .text_color(rgb(0x0f1115))
                                     .child("设置"),
                             )
                             .child(self.nav_rows(cx)),
@@ -215,7 +215,7 @@ impl Render for SettingsModal {
                                     .px_3()
                                     .py_2()
                                     .border_b_1()
-                                    .border_color(rgb(0x23262d))
+                                    .border_color(rgb(0xe5e7eb))
                                     .child(
                                         div()
                                             .size_7()
@@ -223,10 +223,10 @@ impl Render for SettingsModal {
                                             .flex()
                                             .items_center()
                                             .justify_center()
-                                            .hover(|s| s.bg(rgb(0x23262d)))
+                                            .hover(|s| s.bg(rgb(0xf1f3f5)))
                                             .cursor_pointer()
                                             .on_mouse_down(gpui::MouseButton::Left, handle_close)
-                                            .child(icons::close(14.0, rgb(0x979da6))),
+                                            .child(icons::close(14.0, rgb(0x81858c))),
                                     ),
                             )
                             // Section body
@@ -255,11 +255,12 @@ fn nav_cell(
         .flex()
         .items_center()
         .gap_2p5()
+        .w(px(164.0))
+        .h(px(40.0))
         .px_3()
-        .py_2()
-        .rounded_lg()
-        .bg(if active { rgb(0x1f2228) } else { rgb(0x13151b) })
-        .hover(|s| s.bg(rgb(0x1f2228)))
+        .rounded(px(12.0))
+        .bg(if active { rgb(0xe9edf2) } else { rgb(0xf5f6f8) })
+        .hover(|s| s.bg(rgb(0xf1f3f5)))
         .cursor_pointer()
         .on_mouse_down(gpui::MouseButton::Left, handler)
         .child(icon)
@@ -271,7 +272,7 @@ fn nav_cell(
                 } else {
                     FontWeight::NORMAL
                 })
-                .text_color(if active { rgb(0xffffff) } else { rgb(0x979da6) })
+                .text_color(if active { rgb(0x0f1115) } else { rgb(0x61666b) })
                 .child(label.to_string()),
         )
 }
@@ -280,7 +281,7 @@ fn section_label(text: &str) -> impl IntoElement {
     div()
         .text_xs()
         .font_weight(FontWeight::BOLD)
-        .text_color(rgb(0x979da6))
+        .text_color(rgb(0x61666b))
         .child(text.to_string())
 }
 
@@ -293,18 +294,18 @@ fn field_row(label: &str, value: &str) -> impl IntoElement {
             div()
                 .text_xs()
                 .font_weight(FontWeight::BOLD)
-                .text_color(rgb(0x979da6))
+                .text_color(rgb(0x61666b))
                 .child(label.to_string()),
         )
         .child(
             div()
                 .p_2p5()
                 .rounded_lg()
-                .bg(rgb(0x191c22))
+                .bg(rgb(0xf5f6f8))
                 .border_1()
-                .border_color(rgb(0x282c34))
+                .border_color(rgb(0xe1e5eb))
                 .text_xs()
-                .text_color(rgb(0xe4e4e7))
+                .text_color(rgb(0x3f454d))
                 .child(value.to_string()),
         )
 }

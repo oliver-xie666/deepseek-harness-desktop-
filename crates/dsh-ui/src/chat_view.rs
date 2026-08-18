@@ -17,7 +17,12 @@ pub struct ChatView {
     pub workspace_selector: Entity<WorkspaceSelector>,
     pub preset_selector: Entity<AgentPresetSelector>,
     pub has_messages: bool,
+    pub has_active_session: bool,
     pub active_prompt: String,
+    pub active_session_title: String,
+    pub active_turns: usize,
+    pub active_steps: usize,
+    pub active_tool_ms: u64,
     pub streaming_text: String,
 }
 
@@ -38,7 +43,12 @@ impl ChatView {
             workspace_selector,
             preset_selector,
             has_messages: false,
+            has_active_session: false,
             active_prompt: String::new(),
+            active_session_title: String::new(),
+            active_turns: 0,
+            active_steps: 0,
+            active_tool_ms: 0,
             streaming_text: String::new(),
         };
 
@@ -70,13 +80,41 @@ impl ChatView {
                     continue;
                 };
 
-                if text == last_snapshot {
+                let snapshot_key = format!("{}:{}:{}", session.id, session.title, text);
+                if snapshot_key == last_snapshot {
                     continue;
                 }
-                last_snapshot = text.clone();
+                last_snapshot = snapshot_key;
+
+                let turns = session
+                    .messages
+                    .iter()
+                    .filter(|message| matches!(message.sender, dsh_core::MessageSender::User))
+                    .count();
+                let assistant_steps = session
+                    .messages
+                    .iter()
+                    .filter(|message| matches!(message.sender, dsh_core::MessageSender::Assistant))
+                    .count();
+                let tool_steps = session
+                    .messages
+                    .iter()
+                    .map(|message| message.tool_calls.len())
+                    .sum::<usize>();
+                let tool_ms = session
+                    .messages
+                    .iter()
+                    .flat_map(|message| message.tool_calls.iter())
+                    .map(|tool| tool.duration_ms)
+                    .sum::<u64>();
 
                 this.update(cx, |view, cx| {
                     view.has_messages = !session.messages.is_empty();
+                    view.has_active_session = view.has_messages || session.title != "新会话";
+                    view.active_session_title = session.title.clone();
+                    view.active_turns = turns;
+                    view.active_steps = assistant_steps + tool_steps;
+                    view.active_tool_ms = tool_ms;
                     view.active_prompt = session
                         .messages
                         .iter()
@@ -97,7 +135,12 @@ impl ChatView {
 
     pub fn reset(&mut self, cx: &mut Context<Self>) {
         self.has_messages = false;
+        self.has_active_session = false;
         self.active_prompt.clear();
+        self.active_session_title.clear();
+        self.active_turns = 0;
+        self.active_steps = 0;
+        self.active_tool_ms = 0;
         self.streaming_text.clear();
         self.text_input.update(cx, |input, cx| {
             input.clear(cx);
@@ -152,7 +195,7 @@ impl ChatView {
 
                 div()
                     .font_weight(FontWeight::BOLD)
-                    .text_color(rgb(0xffffff))
+                    .text_color(rgb(0x0f1115))
                     .py_1()
                     .child(format!("{} {}", "#".repeat(level as usize), text))
             }
@@ -165,28 +208,26 @@ impl ChatView {
                     match span {
                         InlineSpan::Bold(t) => div()
                             .font_weight(FontWeight::BOLD)
-                            .text_color(rgb(0xffffff))
+                            .text_color(rgb(0x0f1115))
                             .child(t),
-                        InlineSpan::Italic(t) => div().text_color(rgb(0xd4d4d8)).child(t),
+                        InlineSpan::Italic(t) => div().text_color(rgb(0x61666b)).child(t),
                         InlineSpan::Code(t) => div()
                             .px_1p5()
                             .py_0p5()
                             .rounded_md()
-                            .bg(rgb(0x282c34))
-                            .text_color(rgb(0xf43f5e))
+                            .bg(rgb(0xf1f3f5))
+                            .text_color(rgb(0x0f1115))
                             .child(t),
-                        InlineSpan::Text(t) => div().text_color(rgb(0xe4e4e7)).child(t),
-                        InlineSpan::Link { text, .. } => div()
-                            .text_color(rgb(0x60a5fa))
-                            .underline()
-                            .cursor_pointer()
-                            .child(text),
+                        InlineSpan::Text(t) => div().text_color(rgb(0x3f454d)).child(t),
+                        InlineSpan::Link { text, .. } => {
+                            div().text_color(rgb(0x60a5fa)).cursor_pointer().child(text)
+                        }
                         InlineSpan::FilePath { path, .. } => div()
                             .px_1p5()
                             .py_0p5()
                             .rounded_md()
-                            .bg(rgb(0x1e293b))
-                            .text_color(rgb(0x38bdf8))
+                            .bg(rgb(0x2c2c2e))
+                            .text_color(rgb(0x679efe))
                             .cursor_pointer()
                             .child(path),
                     }
@@ -196,10 +237,10 @@ impl ChatView {
 
                 div()
                     .my_2()
-                    .rounded_lg()
-                    .bg(rgb(0x13151b))
+                    .rounded(px(12.0))
+                    .bg(rgb(0xf5f6f8))
                     .border_1()
-                    .border_color(rgb(0x282c34))
+                    .border_color(rgb(0xe1e5eb))
                     .flex()
                     .flex_col()
                     .child(
@@ -209,14 +250,14 @@ impl ChatView {
                             .justify_between()
                             .px_3()
                             .py_1p5()
-                            .bg(rgb(0x191c22))
+                            .bg(rgb(0xf5f6f8))
                             .text_xs()
-                            .text_color(rgb(0x979da6))
+                            .text_color(rgb(0x81858c))
                             .child(language)
                             .child(
                                 div()
                                     .cursor_pointer()
-                                    .hover(|s| s.text_color(rgb(0xffffff)))
+                                    .hover(|s| s.text_color(rgb(0x0f1115)))
                                     .child("复制"),
                             ),
                     )
@@ -234,7 +275,7 @@ impl ChatView {
                                     TokenType::String => rgb(0x4ade80),
                                     TokenType::Comment => rgb(0x61666b),
                                     TokenType::Number => rgb(0xc084fc),
-                                    _ => rgb(0xe4e4e7),
+                                    _ => rgb(0x3f454d),
                                 };
                                 div().text_color(color).child(span.text)
                             })),
@@ -252,12 +293,12 @@ impl ChatView {
                 div()
                     .my_2()
                     .p_3()
-                    .rounded_lg()
-                    .bg(rgb(0x151b28))
+                    .rounded(px(12.0))
+                    .bg(rgb(0xe8f0ff))
                     .border_l_4()
-                    .border_color(rgb(0x4176e6))
+                    .border_color(rgb(0x3964fe))
                     .text_xs()
-                    .text_color(rgb(0xe2e8f0))
+                    .text_color(rgb(0x3f454d))
                     .child(text)
             }
             _ => div(),
@@ -276,7 +317,7 @@ impl ChatView {
             .flex_col()
             .items_center()
             .justify_center()
-            .gap_6()
+            .gap_3()
             .p_8()
             // Soft blue glow backdrop (official HeroGlow)
             .child(
@@ -294,12 +335,13 @@ impl ChatView {
                     .flex()
                     .items_center()
                     .gap_2p5()
-                    .child(icons::fish(34.0, rgb(0xffffff)))
+                    .child(icons::fish(34.0, rgb(0x0f1115)))
                     .child(
                         div()
-                            .font_weight(FontWeight::BOLD)
-                            .text_2xl()
-                            .text_color(rgb(0xffffff))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_size(px(26.0))
+                            .line_height(px(32.0))
+                            .text_color(rgb(0x0f1115))
                             .child("探索未至之境"),
                     )
                     .child(
@@ -307,21 +349,21 @@ impl ChatView {
                             .px_2()
                             .py_0p5()
                             .rounded_full()
-                            .bg(rgb(0x1e293b))
+                            .bg(rgb(0xe8f0ff))
                             .border_1()
-                            .border_color(rgb(0x334155))
+                            .border_color(rgb(0xd7e4ff))
                             .text_xs()
-                            .text_color(rgb(0x60a5fa))
+                            .text_color(rgb(0x3964fe))
                             .child("预览版"),
                     ),
             )
             // Workspace + preset chips row, then the composer card
             .child(
                 div()
-                    .w(px(720.0))
+                    .w(px(776.0))
                     .flex()
                     .flex_col()
-                    .gap_2()
+                    .gap_3()
                     .child(
                         div()
                             .flex()
@@ -335,11 +377,14 @@ impl ChatView {
                         div()
                             .w_full()
                             .min_h(px(120.0))
-                            .rounded_2xl()
-                            .bg(rgb(0x181a20))
+                            .rounded(px(22.0))
+                            .bg(rgb(0xffffff))
                             .border_1()
-                            .border_color(rgb(0x2a2d35))
-                            .p_4()
+                            .border_color(rgb(0xe1e5eb))
+                            .shadow_lg()
+                            .pt_2p5()
+                            .px_3p5()
+                            .pb_3()
                             .flex()
                             .flex_col()
                             .justify_between()
@@ -352,38 +397,197 @@ impl ChatView {
                                     .pt_2()
                                     .child(
                                         div()
-                                            .size_7()
-                                            .rounded_full()
                                             .flex()
                                             .items_center()
-                                            .justify_center()
-                                            .text_sm()
-                                            .text_color(rgb(0x61666b))
-                                            .hover(|s| {
-                                                s.bg(rgb(0x212328)).text_color(rgb(0xffffff))
-                                            })
-                                            .cursor_pointer()
-                                            .child("+"),
+                                            .gap_2()
+                                            .child(
+                                                div()
+                                                    .size(px(28.0))
+                                                    .rounded_full()
+                                                    .bg(rgb(0xf1f3f5))
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .text_sm()
+                                                    .text_color(rgb(0x61666b))
+                                                    .hover(|s| {
+                                                        s.bg(rgb(0xe9edf2))
+                                                            .text_color(rgb(0x0f1115))
+                                                    })
+                                                    .cursor_pointer()
+                                                    .child(icons::plus(14.0, rgb(0x61666b))),
+                                            )
+                                            .child(self.render_access_selector()),
                                     )
                                     .child(
                                         div()
-                                            .size_8()
-                                            .rounded_full()
-                                            .bg(rgb(0x2a334a))
-                                            .hover(|s| s.bg(rgb(0x4176e6)))
                                             .flex()
                                             .items_center()
-                                            .justify_center()
-                                            .text_sm()
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(rgb(0xffffff))
-                                            .cursor_pointer()
-                                            .on_mouse_down(gpui::MouseButton::Left, handle_submit)
-                                            .child("↑"),
+                                            .gap_3()
+                                            .child(self.render_model_selector())
+                                            .child(
+                                                div()
+                                                    .size(px(34.0))
+                                                    .rounded_full()
+                                                    .bg(rgb(0xadc6ff))
+                                                    .hover(|s| s.bg(rgb(0x679efe)))
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .text_sm()
+                                                    .font_weight(FontWeight::BOLD)
+                                                    .text_color(rgb(0xffffff))
+                                                    .cursor_pointer()
+                                                    .on_mouse_down(
+                                                        gpui::MouseButton::Left,
+                                                        handle_submit,
+                                                    )
+                                                    .child(icons::send(16.0, rgb(0xffffff))),
+                                            ),
                                     ),
                             ),
                     ),
             )
+    }
+
+    fn render_session_header(&self) -> impl IntoElement {
+        let title = if self.active_session_title.is_empty() {
+            "新会话"
+        } else {
+            &self.active_session_title
+        };
+
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .border_b_1()
+            .border_color(rgb(0xe5e7eb))
+            .child(
+                div()
+                    .h(px(42.0))
+                    .px_4()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(rgb(0x0f1115))
+                                    .child(title.to_string()),
+                            )
+                            .child(icons::agent_preset(14.0, rgb(0x61666b)))
+                            .child(div().text_xs().text_color(rgb(0x61666b)).child("PTC 模式"))
+                            .child(icons::chevron_down(12.0, rgb(0x81858c))),
+                    )
+                    .child(
+                        div()
+                            .px_2p5()
+                            .py_1()
+                            .rounded(px(8.0))
+                            .border_1()
+                            .border_color(rgb(0xe1e5eb))
+                            .text_xs()
+                            .text_color(rgb(0x61666b))
+                            .child("Session log ↓"),
+                    ),
+            )
+            .child(
+                div()
+                    .h(px(30.0))
+                    .px_4()
+                    .flex()
+                    .items_end()
+                    .gap_5()
+                    .child(
+                        div()
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .border_b_2()
+                            .border_color(rgb(0x3964fe))
+                            .text_xs()
+                            .text_color(rgb(0x3964fe))
+                            .child("对话"),
+                    )
+                    .child(
+                        div()
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .text_xs()
+                            .text_color(rgb(0x81858c))
+                            .child("轨迹"),
+                    ),
+            )
+    }
+
+    fn render_access_selector(&self) -> impl IntoElement {
+        div()
+            .h(px(28.0))
+            .flex()
+            .items_center()
+            .gap_1()
+            .px_1p5()
+            .rounded_md()
+            .hover(|s| s.bg(rgb(0xf1f3f5)))
+            .cursor_pointer()
+            .child(icons::check(14.0, rgb(0x61666b)))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(0x3f454d))
+                    .child("Full access"),
+            )
+            .child(icons::chevron_down(12.0, rgb(0x81858c)))
+    }
+
+    fn render_model_selector(&self) -> impl IntoElement {
+        div()
+            .h(px(28.0))
+            .flex()
+            .items_center()
+            .gap_1()
+            .px_1p5()
+            .rounded_md()
+            .hover(|s| s.bg(rgb(0xf1f3f5)))
+            .cursor_pointer()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(0x3f454d))
+                    .child("gpt-5.6-luna"),
+            )
+            .child(icons::chevron_down(12.0, rgb(0x81858c)))
+    }
+
+    fn render_stats_line(&self) -> impl IntoElement {
+        let turns = self.active_turns.max(1);
+        let steps = self.active_steps.max(turns);
+        let summary = format!("{} 轮 · {} 步", turns, steps);
+        let tool_summary = if self.active_tool_ms > 0 {
+            format!("工具调用 {}ms", self.active_tool_ms)
+        } else {
+            "工具调用 --".to_string()
+        };
+
+        div()
+            .max_w(px(776.0))
+            .w_full()
+            .pt_1()
+            .px_2()
+            .text_xs()
+            .text_color(rgb(0x81858c))
+            .child(format!(
+                "{} | LLM -- · {} | 首 token -- · -- tok/s | 缓存命中 -- | 输入 -- tok · 输出 -- tok",
+                summary, tool_summary
+            ))
     }
 
     fn render_active_messages(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -408,62 +612,66 @@ impl ChatView {
 
         div()
             .flex_1()
-            .p_6()
             .overflow_hidden()
             .flex()
             .flex_col()
-            .gap_4()
-            .child(
-                div().flex().justify_end().child(
-                    div()
-                        .max_w_3_4()
-                        .px_4()
-                        .py_2p5()
-                        .rounded_2xl()
-                        .bg(rgb(0x4176e6))
-                        .text_sm()
-                        .text_color(rgb(0xffffff))
-                        .child(user_prompt.to_string()),
-                ),
-            )
+            .child(self.render_session_header())
             .child(
                 div()
+                    .flex_1()
+                    .p_6()
+                    .overflow_hidden()
                     .flex()
                     .flex_col()
-                    .gap_3()
-                    .max_w_full()
-                    .p_4()
-                    .rounded_2xl()
-                    .bg(rgb(0x15171b))
-                    .border_1()
-                    .border_color(rgb(0x282c34))
+                    .gap_4()
+                    .child(
+                        div().flex().justify_end().child(
+                            div()
+                                .max_w_3_4()
+                                .px_4()
+                                .py_2p5()
+                                .rounded_2xl()
+                                .bg(rgb(0xe8f0ff))
+                                .text_sm()
+                                .text_color(rgb(0x0f1115))
+                                .child(user_prompt.to_string()),
+                        ),
+                    )
                     .child(
                         div()
                             .flex()
-                            .items_center()
-                            .gap_2()
-                            .px_3()
-                            .py_1p5()
-                            .rounded_md()
-                            .bg(rgb(0x191c22))
-                            .border_1()
-                            .border_color(rgb(0x282c34))
-                            .hover(|s| s.bg(rgb(0x1f2228)).border_color(rgb(0x4176e6)))
-                            .cursor_pointer()
-                            .on_mouse_down(gpui::MouseButton::Left, handle_tool_click)
-                            .child(div().text_xs().child("🔧"))
+                            .flex_col()
+                            .gap_3()
+                            .max_w_full()
+                            .p_4()
                             .child(
                                 div()
-                                    .text_xs()
-                                    .text_color(rgb(0x979da6))
-                                    .child("grep_search (100ms)"),
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .px_3()
+                                    .py_1p5()
+                                    .rounded_md()
+                                    .bg(rgb(0xf5f6f8))
+                                    .border_1()
+                                    .border_color(rgb(0xe1e5eb))
+                                    .hover(|s| s.bg(rgb(0xf1f3f5)).border_color(rgb(0x3964fe)))
+                                    .cursor_pointer()
+                                    .on_mouse_down(gpui::MouseButton::Left, handle_tool_click)
+                                    .child(icons::agent_preset(14.0, rgb(0x61666b)))
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(rgb(0x61666b))
+                                            .child("grep_search (100ms)"),
+                                    )
+                                    .child(div().text_xs().text_color(rgb(0x16a34a)).child("✓")),
                             )
-                            .child(div().text_xs().text_color(rgb(0x22c55e)).child("✓")),
-                    )
-                    .children(
-                        StreamingMarkdownParser::parse_markdown(&self.streaming_text)
-                            .into_iter()
-                            .map(|b| self.render_markdown_block(b)),
+                            .children(
+                                StreamingMarkdownParser::parse_markdown(&self.streaming_text)
+                                    .into_iter()
+                                    .map(|b| self.render_markdown_block(b)),
+                            ),
                     ),
             )
     }
@@ -479,55 +687,90 @@ impl Render for ChatView {
         div()
             .flex_1()
             .h_full()
-            .bg(rgb(0x0d0f12))
+            .bg(rgb(0xffffff))
             .flex()
             .flex_col()
             .justify_between()
             .relative()
-            .child(if has_messages {
+            .child(if has_messages || self.has_active_session {
                 self.render_active_messages(cx).into_any_element()
             } else {
                 self.render_empty_state(window, cx).into_any_element()
             })
-            .when(has_messages, |this| {
+            .when(has_messages || self.has_active_session, |this| {
                 this.child(
                     div()
                         .p_4()
-                        .bg(rgb(0x0d0f12))
+                        .bg(rgb(0xffffff))
                         .flex()
                         .flex_col()
                         .items_center()
                         .child(
                             div()
-                                .max_w(px(720.0))
+                                .max_w(px(776.0))
                                 .w_full()
                                 .rounded_2xl()
-                                .bg(rgb(0x181a20))
+                                .bg(rgb(0xffffff))
                                 .border_1()
-                                .border_color(rgb(0x2a2d35))
+                                .border_color(rgb(0xe1e5eb))
                                 .p_3()
                                 .flex()
-                                .items_center()
-                                .justify_between()
-                                .gap_3()
+                                .flex_col()
+                                .gap_2()
                                 .child(self.text_input.clone())
                                 .child(
                                     div()
-                                        .size_8()
-                                        .rounded_full()
-                                        .bg(rgb(0x4176e6))
-                                        .hover(|s| s.bg(rgb(0x4d93f8)))
                                         .flex()
                                         .items_center()
-                                        .justify_center()
-                                        .text_sm()
-                                        .font_weight(FontWeight::BOLD)
-                                        .text_color(rgb(0xffffff))
-                                        .cursor_pointer()
-                                        .on_mouse_down(gpui::MouseButton::Left, handle_submit)
-                                        .child("↑"),
+                                        .justify_between()
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap_2()
+                                                .child(
+                                                    div()
+                                                        .size(px(28.0))
+                                                        .rounded_full()
+                                                        .bg(rgb(0xf1f3f5))
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .hover(|s| s.bg(rgb(0xe9edf2)))
+                                                        .cursor_pointer()
+                                                        .child(icons::plus(14.0, rgb(0x61666b))),
+                                                )
+                                                .child(self.render_access_selector()),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap_3()
+                                                .child(self.render_model_selector())
+                                                .child(
+                                                    div()
+                                                        .size(px(34.0))
+                                                        .rounded_full()
+                                                        .bg(rgb(0x679efe))
+                                                        .hover(|s| s.bg(rgb(0x4176e6)))
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .text_sm()
+                                                        .font_weight(FontWeight::BOLD)
+                                                        .text_color(rgb(0xffffff))
+                                                        .cursor_pointer()
+                                                        .on_mouse_down(
+                                                            gpui::MouseButton::Left,
+                                                            handle_submit,
+                                                        )
+                                                        .child(icons::send(16.0, rgb(0xffffff))),
+                                                ),
+                                        ),
                                 ),
-                        ),
+                        )
+                        .child(self.render_stats_line()),
                 )
             })
     }

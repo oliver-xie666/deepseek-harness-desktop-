@@ -20,7 +20,7 @@ impl WorkspaceView {
     pub fn new(state: Entity<Arc<AppState>>, cx: &mut Context<Self>) -> Self {
         let title_bar = cx.new(|_| TitleBar::new("deepseek-harness-desktop"));
         let settings_modal = cx.new(|_| SettingsModal::new());
-        let sidebar = cx.new(|_| Sidebar::new(settings_modal.clone()));
+        let sidebar = cx.new(|_| Sidebar::new(state.clone(), settings_modal.clone()));
         let details_drawer = cx.new(|_| DetailsDrawer::new());
         let chat_view = cx.new(|cx| ChatView::new(state.clone(), details_drawer.clone(), cx));
 
@@ -39,7 +39,7 @@ impl Render for WorkspaceView {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .size_full()
-            .bg(rgb(0x0d0f12))
+            .bg(rgb(0xf9fafb))
             .flex()
             .flex_col()
             .relative()

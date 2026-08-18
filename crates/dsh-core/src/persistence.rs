@@ -17,7 +17,11 @@ impl SessionPersistence {
         let json = serde_json::to_string_pretty(session)?;
         fs::write(&session_file, json)?;
 
-        info!("Persisted session {} to {}", session.id, session_file.display());
+        info!(
+            "Persisted session {} to {}",
+            session.id,
+            session_file.display()
+        );
         Ok(())
     }
 

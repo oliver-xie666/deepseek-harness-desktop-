@@ -18,11 +18,11 @@ impl TitleBar {
 impl Render for TitleBar {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .h_9()
+            .h_0()
             .w_full()
-            .bg(rgb(0x0d0f12))
+            .bg(rgb(0xf9fafb))
             .border_b_1()
-            .border_color(rgb(0x1a1c22))
+            .border_color(rgb(0xe5e7eb))
             .flex()
             .items_center()
             .justify_end()
@@ -43,8 +43,8 @@ impl Render for TitleBar {
                             .items_center()
                             .justify_center()
                             .text_xs()
-                            .text_color(rgb(0x979da6))
-                            .hover(|s| s.bg(rgb(0x1a1c22)).text_color(rgb(0xffffff)))
+                            .text_color(rgb(0x81858c))
+                            .hover(|s| s.bg(rgb(0xf1f3f5)).text_color(rgb(0x0f1115)))
                             .cursor_pointer()
                             .on_mouse_down(gpui::MouseButton::Left, |_, window, _| {
                                 window.minimize_window();
@@ -60,8 +60,8 @@ impl Render for TitleBar {
                             .items_center()
                             .justify_center()
                             .text_xs()
-                            .text_color(rgb(0x979da6))
-                            .hover(|s| s.bg(rgb(0x1a1c22)).text_color(rgb(0xffffff)))
+                            .text_color(rgb(0x81858c))
+                            .hover(|s| s.bg(rgb(0xf1f3f5)).text_color(rgb(0x0f1115)))
                             .cursor_pointer()
                             .on_mouse_down(gpui::MouseButton::Left, |_, window, _| {
                                 window.zoom_window();
@@ -77,7 +77,7 @@ impl Render for TitleBar {
                             .items_center()
                             .justify_center()
                             .text_xs()
-                            .text_color(rgb(0x979da6))
+                            .text_color(rgb(0x81858c))
                             .hover(|s| s.bg(rgb(0xef4444)).text_color(rgb(0xffffff)))
                             .cursor_pointer()
                             .on_mouse_down(gpui::MouseButton::Left, |_, window, _| {

@@ -7,7 +7,11 @@ pub struct DiffApplier;
 
 impl DiffApplier {
     /// Safely writes updated content to the target file using atomic replacement
-    pub fn apply_file_content(workspace_root: &Path, rel_path: &str, new_content: &str) -> Result<PathBuf> {
+    pub fn apply_file_content(
+        workspace_root: &Path,
+        rel_path: &str,
+        new_content: &str,
+    ) -> Result<PathBuf> {
         let target_path = workspace_root.join(rel_path);
 
         if let Some(parent) = target_path.parent() {
@@ -31,7 +35,10 @@ impl DiffApplier {
             DshError::Io(e)
         })?;
 
-        info!("Successfully applied file changes to {}", target_path.display());
+        info!(
+            "Successfully applied file changes to {}",
+            target_path.display()
+        );
         Ok(target_path)
     }
 

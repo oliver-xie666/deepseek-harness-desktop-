@@ -1,33 +1,24 @@
 use crate::icons;
 use gpui::{deferred, div, prelude::*, px, rgb, Context, FontWeight, IntoElement, Rgba, Window};
 
-// Shared palette (DeepSeek Harness dark theme).
-fn bg_main() -> Rgba {
-    rgb(0x0d0f12)
-}
-fn bg_chip_open() -> Rgba {
-    rgb(0x212328)
-}
-fn bg_hover() -> Rgba {
-    rgb(0x1e2025)
-}
+// Shared palette matching the official light theme in 01.png and 02.png.
 fn bg_menu() -> Rgba {
-    rgb(0x181a20)
-}
-fn bg_menu_item_hover() -> Rgba {
-    rgb(0x212328)
-}
-fn border_menu() -> Rgba {
-    rgb(0x2a2d35)
-}
-fn text_primary() -> Rgba {
     rgb(0xffffff)
 }
+fn bg_menu_item_hover() -> Rgba {
+    rgb(0xf1f3f5)
+}
+fn border_menu() -> Rgba {
+    rgb(0xe1e5eb)
+}
+fn text_primary() -> Rgba {
+    rgb(0x0f1115)
+}
 fn text_muted() -> Rgba {
-    rgb(0x979da6)
+    rgb(0x61666b)
 }
 fn text_faint() -> Rgba {
-    rgb(0x61666b)
+    rgb(0x81858c)
 }
 
 /// The workspace picker chip shown on the new-session hero: a folder glyph
@@ -42,8 +33,8 @@ impl WorkspaceSelector {
     pub fn new() -> Self {
         Self {
             is_open: false,
-            current_workspace: "选择工作区".into(),
-            has_selection: false,
+            current_workspace: "deepseek-harness-desktop".into(),
+            has_selection: true,
         }
     }
 
@@ -86,12 +77,11 @@ impl Render for WorkspaceSelector {
                     .items_center()
                     .gap_1p5()
                     .px_2()
-                    .py_1()
-                    .rounded_lg()
-                    .bg(if is_open { bg_chip_open() } else { bg_main() })
-                    .hover(|s| s.bg(bg_hover()).text_color(text_primary()))
+                    .h(px(28.0))
+                    .rounded(px(16.0))
+                    .hover(|s| s.text_color(text_primary()))
                     .cursor_pointer()
-                    .text_xs()
+                    .text_size(px(13.0))
                     .text_color(text_muted())
                     .on_mouse_down(gpui::MouseButton::Left, handle_toggle)
                     .child(if has_selection {
@@ -130,12 +120,17 @@ impl Render for WorkspaceSelector {
                                 .gap_2()
                                 .px_2()
                                 .py_1p5()
-                                .rounded_lg()
+                                .rounded(px(10.0))
                                 .hover(|s| s.bg(bg_menu_item_hover()))
                                 .cursor_pointer()
                                 .on_mouse_down(gpui::MouseButton::Left, handle_select)
                                 .child(icons::folder_close(16.0, text_muted()))
-                                .child(div().text_xs().text_color(text_primary()).child(name))
+                                .child(
+                                    div()
+                                        .text_size(px(13.0))
+                                        .text_color(text_primary())
+                                        .child(name),
+                                )
                         }))
                         // Divider + pinned "add workspace…" action
                         .child(div().h(px(1.0)).bg(border_menu()).my_1())
@@ -146,13 +141,13 @@ impl Render for WorkspaceSelector {
                                 .gap_2()
                                 .px_2()
                                 .py_1p5()
-                                .rounded_lg()
+                                .rounded(px(10.0))
                                 .hover(|s| s.bg(bg_menu_item_hover()))
                                 .cursor_pointer()
                                 .child(icons::plus(16.0, text_muted()))
                                 .child(
                                     div()
-                                        .text_xs()
+                                        .text_size(px(13.0))
                                         .text_color(text_muted())
                                         .child("添加工作区…"),
                                 ),
@@ -228,12 +223,11 @@ impl Render for AgentPresetSelector {
                     .items_center()
                     .gap_1p5()
                     .px_2()
-                    .py_1()
-                    .rounded_lg()
-                    .bg(if is_open { bg_chip_open() } else { bg_main() })
-                    .hover(|s| s.bg(bg_hover()).text_color(text_primary()))
+                    .h(px(28.0))
+                    .rounded(px(16.0))
+                    .hover(|s| s.text_color(text_primary()))
                     .cursor_pointer()
-                    .text_xs()
+                    .text_size(px(13.0))
                     .text_color(text_muted())
                     .on_mouse_down(gpui::MouseButton::Left, handle_toggle)
                     .child(icons::agent_preset(16.0, text_muted()))
@@ -271,7 +265,7 @@ impl Render for AgentPresetSelector {
                                 .gap_2()
                                 .px_2()
                                 .py_2()
-                                .rounded_lg()
+                                .rounded(px(10.0))
                                 .hover(|s| s.bg(bg_menu_item_hover()))
                                 .cursor_pointer()
                                 .on_mouse_down(gpui::MouseButton::Left, handle_select)
@@ -282,13 +276,16 @@ impl Render for AgentPresetSelector {
                                         .gap_0p5()
                                         .child(
                                             div()
-                                                .text_xs()
+                                                .text_size(px(13.0))
                                                 .font_weight(FontWeight::MEDIUM)
                                                 .text_color(text_primary())
                                                 .child(name.clone()),
                                         )
                                         .child(
-                                            div().text_xs().text_color(text_faint()).child(desc),
+                                            div()
+                                                .text_size(px(12.0))
+                                                .text_color(text_faint())
+                                                .child(desc),
                                         ),
                                 )
                                 .when(selected, |this| {

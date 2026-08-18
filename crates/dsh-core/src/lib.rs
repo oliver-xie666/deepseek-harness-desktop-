@@ -8,9 +8,7 @@ pub mod ws_client;
 use chrono::{DateTime, Utc};
 use dsh_common::{AppPaths, Result};
 use dsh_daemon::{DaemonConfig, DaemonManager};
-use dsh_protocol::{
-    AgentState, HarnessClientMessage, HarnessServerEvent, ToolStatus,
-};
+use dsh_protocol::{AgentState, HarnessClientMessage, HarnessServerEvent, ToolStatus};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -123,7 +121,10 @@ impl AppState {
             agent_state: Some(AgentState::Idle),
         };
 
-        self.sessions.write().await.insert(session_id.clone(), session.clone());
+        self.sessions
+            .write()
+            .await
+            .insert(session_id.clone(), session.clone());
         *self.active_session_id.write().await = Some(session_id.clone());
 
         // Auto persist
@@ -158,7 +159,12 @@ impl AppState {
         Ok(())
     }
 
-    pub async fn apply_diff(&self, session_id: &str, diff_id: &str, new_content: &str) -> Result<()> {
+    pub async fn apply_diff(
+        &self,
+        session_id: &str,
+        diff_id: &str,
+        new_content: &str,
+    ) -> Result<()> {
         let workspace = self.workspace_path.read().await.clone();
         let mut sessions = self.sessions.write().await;
 
@@ -201,7 +207,8 @@ impl AppState {
             } => {
                 if let Some(session) = self.sessions.write().await.get_mut(&session_id) {
                     if let Some(last_msg) = session.messages.last_mut() {
-                        if last_msg.sender == MessageSender::Assistant && last_msg.id == message_id {
+                        if last_msg.sender == MessageSender::Assistant && last_msg.id == message_id
+                        {
                             last_msg.content.push_str(&text);
                             return;
                         }
@@ -276,9 +283,7 @@ impl AppState {
                 }
             }
             HarnessServerEvent::TerminalLog {
-                session_id,
-                line,
-                ..
+                session_id, line, ..
             } => {
                 if let Some(session) = self.sessions.write().await.get_mut(&session_id) {
                     session.terminal_logs.push(line);
@@ -297,7 +302,10 @@ mod tests {
     async fn test_app_state_session() {
         let (state, _) = AppState::new(DaemonConfig::default());
         let session_id = state.create_session("Test Session", "/tmp").await;
-        assert_eq!(*state.active_session_id.read().await, Some(session_id.clone()));
+        assert_eq!(
+            *state.active_session_id.read().await,
+            Some(session_id.clone())
+        );
 
         state
             .handle_server_event(HarnessServerEvent::TokenChunk {

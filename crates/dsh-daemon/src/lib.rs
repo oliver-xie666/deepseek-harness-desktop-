@@ -102,7 +102,10 @@ impl DaemonManager {
             DshError::Daemon(format!("Failed to bind mock server on {}: {}", addr, e))
         })?;
 
-        info!("Embedded DeepSeek Harness Mock Server listening on ws://{}", addr);
+        info!(
+            "Embedded DeepSeek Harness Mock Server listening on ws://{}",
+            addr
+        );
 
         tokio::spawn(async move {
             while let Ok((stream, peer_addr)) = listener.accept().await {
@@ -138,7 +141,10 @@ impl DaemonManager {
 
                                             let message_id = uuid::Uuid::new_v4().to_string();
                                             for chunk in response.split_inclusive(' ') {
-                                                tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+                                                tokio::time::sleep(
+                                                    tokio::time::Duration::from_millis(20),
+                                                )
+                                                .await;
                                                 let evt = HarnessServerEvent::TokenChunk {
                                                     session_id: session_id.clone(),
                                                     message_id: message_id.clone(),
@@ -160,11 +166,16 @@ impl DaemonManager {
                                             };
                                             let _ = ws_stream
                                                 .send(WsMessage::Text(
-                                                    serde_json::to_string(&tool_start).unwrap().into(),
+                                                    serde_json::to_string(&tool_start)
+                                                        .unwrap()
+                                                        .into(),
                                                 ))
                                                 .await;
 
-                                            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                                            tokio::time::sleep(tokio::time::Duration::from_millis(
+                                                100,
+                                            ))
+                                            .await;
 
                                             let tool_end = HarnessServerEvent::ToolCallEnd {
                                                 session_id: session_id.clone(),
@@ -175,7 +186,9 @@ impl DaemonManager {
                                             };
                                             let _ = ws_stream
                                                 .send(WsMessage::Text(
-                                                    serde_json::to_string(&tool_end).unwrap().into(),
+                                                    serde_json::to_string(&tool_end)
+                                                        .unwrap()
+                                                        .into(),
                                                 ))
                                                 .await;
 
@@ -185,7 +198,9 @@ impl DaemonManager {
                                             };
                                             let _ = ws_stream
                                                 .send(WsMessage::Text(
-                                                    serde_json::to_string(&completed).unwrap().into(),
+                                                    serde_json::to_string(&completed)
+                                                        .unwrap()
+                                                        .into(),
                                                 ))
                                                 .await;
                                         }
@@ -217,13 +232,27 @@ impl DaemonManager {
         #[cfg(target_os = "windows")]
         let mut cmd = {
             let mut c = Command::new("cmd.exe");
-            c.args(["/C", "npx", "-y", "@deepseek-ai/dsh", "web", "--port", &self.config.port.to_string()]);
+            c.args([
+                "/C",
+                "npx",
+                "-y",
+                "@deepseek-ai/dsh",
+                "web",
+                "--port",
+                &self.config.port.to_string(),
+            ]);
             c
         };
         #[cfg(not(target_os = "windows"))]
         let mut cmd = {
             let mut c = Command::new("npx");
-            c.args(["-y", "@deepseek-ai/dsh", "web", "--port", &self.config.port.to_string()]);
+            c.args([
+                "-y",
+                "@deepseek-ai/dsh",
+                "web",
+                "--port",
+                &self.config.port.to_string(),
+            ]);
             c
         };
 
@@ -232,7 +261,10 @@ impl DaemonManager {
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
-                warn!("Failed to spawn @deepseek-ai/dsh daemon: {}. Falling back to embedded mock.", e);
+                warn!(
+                    "Failed to spawn @deepseek-ai/dsh daemon: {}. Falling back to embedded mock.",
+                    e
+                );
                 return self.start_mock_server().await;
             }
         };

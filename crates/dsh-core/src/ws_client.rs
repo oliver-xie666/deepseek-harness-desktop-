@@ -34,7 +34,10 @@ impl HarnessWsClient {
             let mut backoff_ms = 500u64;
 
             loop {
-                info!("Connecting to DeepSeek Harness WebSocket at {}...", self.ws_url);
+                info!(
+                    "Connecting to DeepSeek Harness WebSocket at {}...",
+                    self.ws_url
+                );
 
                 match connect_async(&self.ws_url).await {
                     Ok((ws_stream, _)) => {

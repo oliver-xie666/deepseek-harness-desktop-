@@ -137,6 +137,15 @@ pub fn data(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
         .h(px(size))
 }
 
+/// Send arrow glyph for the Composer primary action.
+pub fn send(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("send.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
+
 /// Close glyph (settings panel close button).
 pub fn close(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
     svg()

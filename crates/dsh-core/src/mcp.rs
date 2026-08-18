@@ -30,10 +30,15 @@ impl McpRegistry {
         vec![
             McpServerConfig {
                 name: "filesystem".to_string(),
-                description: "Local filesystem access for reading, writing, and listing files".to_string(),
+                description: "Local filesystem access for reading, writing, and listing files"
+                    .to_string(),
                 transport: McpTransport::Stdio,
                 command: Some("npx".to_string()),
-                args: vec!["-y".to_string(), "@modelcontextprotocol/server-filesystem".to_string(), ".".to_string()],
+                args: vec![
+                    "-y".to_string(),
+                    "@modelcontextprotocol/server-filesystem".to_string(),
+                    ".".to_string(),
+                ],
                 url: None,
                 env: HashMap::new(),
                 enabled: true,
@@ -63,7 +68,10 @@ impl McpRegistry {
                 description: "GitHub API integration for PRs, issues, and repos".to_string(),
                 transport: McpTransport::Stdio,
                 command: Some("npx".to_string()),
-                args: vec!["-y".to_string(), "@modelcontextprotocol/server-github".to_string()],
+                args: vec![
+                    "-y".to_string(),
+                    "@modelcontextprotocol/server-github".to_string(),
+                ],
                 url: None,
                 env: HashMap::new(),
                 enabled: false,
