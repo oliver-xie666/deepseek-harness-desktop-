@@ -8,6 +8,7 @@ use dsh_markdown::{
 };
 use gpui::{div, prelude::*, px, rgb, rgba, Context, Entity, FontWeight, IntoElement, Window};
 use std::sync::Arc;
+use std::time::Duration;
 
 pub struct ChatView {
     pub state: Entity<Arc<AppState>>,
@@ -30,7 +31,7 @@ impl ChatView {
         let workspace_selector = cx.new(|_| WorkspaceSelector::new());
         let preset_selector = cx.new(|_| AgentPresetSelector::new());
 
-        Self {
+        let view = Self {
             state,
             details_drawer,
             text_input,
@@ -39,7 +40,59 @@ impl ChatView {
             has_messages: false,
             active_prompt: String::new(),
             streaming_text: String::new(),
-        }
+        };
+
+        // AppState is shared with the Tokio WebSocket task, so bridge its
+        // updates into this GPUI entity and redraw only when content changes.
+        let state = view.state.read(cx).clone();
+        cx.spawn(async move |this, cx| {
+            let mut last_snapshot = String::new();
+            loop {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+
+                let snapshot = {
+                    let active_id = state.active_session_id.read().await.clone();
+                    let sessions = state.sessions.read().await;
+                    active_id
+                        .and_then(|id| sessions.get(&id).cloned())
+                        .map(|session| {
+                            let text = session
+                                .messages
+                                .iter()
+                                .map(|message| message.content.as_str())
+                                .collect::<Vec<_>>()
+                                .join("\n\n");
+                            (session, text)
+                        })
+                };
+
+                let Some((session, text)) = snapshot else {
+                    continue;
+                };
+
+                if text == last_snapshot {
+                    continue;
+                }
+                last_snapshot = text.clone();
+
+                this.update(cx, |view, cx| {
+                    view.has_messages = !session.messages.is_empty();
+                    view.active_prompt = session
+                        .messages
+                        .iter()
+                        .find(|message| matches!(message.sender, dsh_core::MessageSender::User))
+                        .map(|message| message.content.clone())
+                        .unwrap_or_default();
+                    view.streaming_text = text;
+                    cx.notify();
+                })?;
+            }
+            #[allow(unreachable_code)]
+            Ok::<(), anyhow::Error>(())
+        })
+        .detach();
+
+        view
     }
 
     pub fn reset(&mut self, cx: &mut Context<Self>) {
@@ -62,8 +115,6 @@ impl ChatView {
 
         self.has_messages = true;
         self.active_prompt = prompt.clone();
-        self.streaming_text = "已连接官方 DeepSeek-V3 引擎。正在分析工作区代码并为您生成实时响应：\n\n```rust\npub async fn start_harness() {\n    println!(\"DeepSeek Harness Native Engine Ready.\");\n}\n```\n\n> [!TIP]\n> 100% 官方 UI 像素级对齐，支持中英文即时键入与 120 FPS 硬件加速渲染。".to_string();
-
         self.text_input.update(cx, |input, cx| {
             input.clear(cx);
         });

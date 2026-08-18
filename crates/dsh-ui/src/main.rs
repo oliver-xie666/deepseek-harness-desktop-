@@ -15,7 +15,6 @@ use dsh_core::AppState;
 use dsh_daemon::{DaemonConfig, DaemonManager};
 use gpui::{px, size, AppContext, Bounds, TitlebarOptions, WindowBounds, WindowOptions};
 use std::path::PathBuf;
-use std::sync::Arc;
 use tracing::info;
 
 #[derive(Parser, Debug)]
@@ -84,17 +83,18 @@ fn main() {
         ..Default::default()
     };
 
-    let daemon_manager = Arc::new(DaemonManager::new(daemon_config.clone()));
-    let daemon_clone = daemon_manager.clone();
+    let (app_state, outbox_rx) = AppState::new(daemon_config);
+    let state_for_runtime = app_state.clone();
 
-    // Start background daemon process
+    // Start the daemon and its WebSocket client from the same AppState so the
+    // outbound queue and inbound event handler share one live connection.
     tokio_runtime.spawn(async move {
-        if let Err(e) = daemon_clone.start().await {
+        if let Err(e) = state_for_runtime.daemon_manager.start().await {
             tracing::warn!("Failed to start deepseek-harness daemon: {}", e);
         }
+        state_for_runtime.load_saved_sessions().await;
+        AppState::start_background_client(state_for_runtime, outbox_rx);
     });
-
-    let (app_state, _rx) = AppState::new(daemon_config);
 
     // Launch GPUI 120 FPS DirectX Engine
     gpui_platform::application().run(move |cx| {

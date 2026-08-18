@@ -19,5 +19,6 @@ dsh-core.workspace = true
 gpui.workspace = true
 gpui_platform.workspace = true
 tokio.workspace = true
+anyhow.workspace = true
 tracing.workspace = true
 clap.workspace = true
