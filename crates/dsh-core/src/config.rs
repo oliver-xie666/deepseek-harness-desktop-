@@ -30,7 +30,7 @@ impl Default for ModelConfig {
             provider: ProviderType::DeepSeek,
             api_key: String::new(),
             base_url: "https://api.deepseek.com".to_string(),
-            model_name: "deepseek-chat".to_string(),
+            model_name: "gpt-5.6-luna".to_string(),
             temperature: 0.7,
             max_tokens: 4096,
             reasoning_effort: "high".to_string(),
@@ -39,11 +39,20 @@ impl Default for ModelConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct UiConfig {
     pub theme: String,
     pub font_size: u32,
     pub show_diff_panel: bool,
     pub show_sidebar: bool,
+    pub language: String,
+    pub permission_mode: String,
+    pub agent_preset: String,
+    pub enter_behavior: String,
+    pub sidebar_default_open: bool,
+    pub sidebar_width_percent: u32,
+    pub open_files_in_sidebar: bool,
+    pub sidebar_position_compat: bool,
 }
 
 impl Default for UiConfig {
@@ -53,6 +62,14 @@ impl Default for UiConfig {
             font_size: 14,
             show_diff_panel: true,
             show_sidebar: true,
+            language: "zh-CN".to_string(),
+            permission_mode: "full-access".to_string(),
+            agent_preset: "standard".to_string(),
+            enter_behavior: "queue".to_string(),
+            sidebar_default_open: true,
+            sidebar_width_percent: 30,
+            open_files_in_sidebar: true,
+            sidebar_position_compat: false,
         }
     }
 }
