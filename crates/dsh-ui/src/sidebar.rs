@@ -1,7 +1,11 @@
 use crate::icons;
 use crate::settings_modal::SettingsModal;
+use crate::text_input::TextInput;
 use dsh_core::{AppState, FileNode, WorkspaceScanner};
-use gpui::{div, prelude::*, px, rgb, Context, Entity, FontWeight, IntoElement, Window};
+use gpui::{
+    deferred, div, prelude::*, px, rgb, Context, Entity, FontWeight, IntoElement, MouseButton,
+    Window,
+};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -11,21 +15,33 @@ pub struct SessionItemView {
     pub is_active: bool,
 }
 
-/// Left column matching the official `SidebarRoot`: brand wordmark + panel
-/// toggle, a "新会话" action, the workspace/session browsing region, and a
-/// footer settings trigger.
+/// Sidebar for workspace navigation and session actions.
 pub struct Sidebar {
     pub file_tree: Option<FileNode>,
     pub sessions: Vec<SessionItemView>,
     pub active_workspace: String,
     pub collapsed: bool,
+    search_open: bool,
+    view_options_open: bool,
+    workspace_menu_open: bool,
+    sort_by_name: bool,
+    session_menu: Option<String>,
+    renaming_session: Option<String>,
+    search_input: Entity<TextInput>,
+    rename_input: Entity<TextInput>,
     state: Entity<Arc<AppState>>,
     settings_modal: Entity<SettingsModal>,
 }
 
 impl Sidebar {
-    pub fn new(state: Entity<Arc<AppState>>, settings_modal: Entity<SettingsModal>) -> Self {
+    pub fn new(
+        state: Entity<Arc<AppState>>,
+        settings_modal: Entity<SettingsModal>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let tree = WorkspaceScanner::scan_dir(Path::new("."), 2).ok();
+        let search_input = cx.new(|cx| TextInput::new("搜索会话…", cx));
+        let rename_input = cx.new(|cx| TextInput::new("输入会话名称", cx));
 
         Self {
             file_tree: tree,
@@ -48,6 +64,14 @@ impl Sidebar {
             ],
             active_workspace: "deepseek-harness-desktop".into(),
             collapsed: false,
+            search_open: false,
+            view_options_open: false,
+            workspace_menu_open: false,
+            sort_by_name: false,
+            session_menu: None,
+            renaming_session: None,
+            search_input,
+            rename_input,
             state,
             settings_modal,
         }
@@ -79,6 +103,7 @@ impl Sidebar {
                 }
             });
         }
+        self.session_menu = None;
         cx.notify();
     }
 
@@ -86,7 +111,7 @@ impl Sidebar {
         for sess in &mut self.sessions {
             sess.is_active = false;
         }
-        let new_id = (self.sessions.len() + 1).to_string();
+        let new_id = format!("session-{}", self.sessions.len() + 1);
         let state = self.state.read(cx).clone();
         self.sessions.insert(
             0,
@@ -99,11 +124,138 @@ impl Sidebar {
         tokio::spawn(async move {
             state.create_session("新会话", ".").await;
         });
+        self.session_menu = None;
         cx.notify();
     }
 
-    pub fn toggle_collapse(&mut self, cx: &mut Context<Self>) {
+    fn toggle_collapse(&mut self, cx: &mut Context<Self>) {
         self.collapsed = !self.collapsed;
+        self.search_open = false;
+        self.view_options_open = false;
+        self.workspace_menu_open = false;
+        self.session_menu = None;
+        cx.notify();
+    }
+
+    fn toggle_search(&mut self, cx: &mut Context<Self>) {
+        self.search_open = !self.search_open;
+        self.view_options_open = false;
+        self.workspace_menu_open = false;
+        self.session_menu = None;
+        if !self.search_open {
+            self.search_input.update(cx, |input, cx| input.clear(cx));
+        }
+        cx.notify();
+    }
+
+    fn toggle_view_options(&mut self, cx: &mut Context<Self>) {
+        self.view_options_open = !self.view_options_open;
+        self.search_open = false;
+        self.workspace_menu_open = false;
+        self.session_menu = None;
+        cx.notify();
+    }
+
+    fn toggle_workspace_menu(&mut self, cx: &mut Context<Self>) {
+        self.workspace_menu_open = !self.workspace_menu_open;
+        self.search_open = false;
+        self.view_options_open = false;
+        self.session_menu = None;
+        cx.notify();
+    }
+
+    fn set_workspace(&mut self, name: &str, cx: &mut Context<Self>) {
+        self.active_workspace = name.to_string();
+        self.workspace_menu_open = false;
+        cx.notify();
+    }
+
+    fn toggle_sort(&mut self, cx: &mut Context<Self>) {
+        self.sort_by_name = !self.sort_by_name;
+        self.view_options_open = false;
+        cx.notify();
+    }
+
+    fn toggle_session_menu(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.session_menu.as_deref() == Some(id) {
+            self.session_menu = None;
+        } else {
+            self.session_menu = Some(id.to_string());
+        }
+        self.view_options_open = false;
+        self.workspace_menu_open = false;
+        cx.notify();
+    }
+
+    fn begin_rename(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(title) = self
+            .sessions
+            .iter()
+            .find(|session| session.id == id)
+            .map(|session| session.title.clone())
+        else {
+            return;
+        };
+        self.rename_input
+            .update(cx, |input, cx| input.set_text(&title, cx));
+        self.renaming_session = Some(id.to_string());
+        self.session_menu = None;
+        cx.notify();
+    }
+
+    fn commit_rename(&mut self, cx: &mut Context<Self>) {
+        let Some(id) = self.renaming_session.take() else {
+            return;
+        };
+        let title = self.rename_input.read(cx).text().trim().to_string();
+        if !title.is_empty() {
+            if let Some(session) = self.sessions.iter_mut().find(|session| session.id == id) {
+                session.title = title;
+            }
+        }
+        self.rename_input.update(cx, |input, cx| input.clear(cx));
+        cx.notify();
+    }
+
+    fn duplicate_session(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(title) = self
+            .sessions
+            .iter()
+            .find(|session| session.id == id)
+            .map(|session| format!("{} 副本", session.title))
+        else {
+            return;
+        };
+        let state = self.state.read(cx).clone();
+        self.sessions.insert(
+            0,
+            SessionItemView {
+                id: format!("session-{}", self.sessions.len() + 1),
+                title: title.clone(),
+                is_active: false,
+            },
+        );
+        self.session_menu = None;
+        tokio::spawn(async move {
+            state.create_session(&title, ".").await;
+        });
+        cx.notify();
+    }
+
+    fn delete_session(&mut self, id: &str, cx: &mut Context<Self>) {
+        let was_active = self
+            .sessions
+            .iter()
+            .find(|session| session.id == id)
+            .map(|session| session.is_active)
+            .unwrap_or(false);
+        self.sessions.retain(|session| session.id != id);
+        if was_active {
+            if let Some(first) = self.sessions.first_mut() {
+                first.is_active = true;
+            }
+        }
+        self.session_menu = None;
         cx.notify();
     }
 
@@ -114,18 +266,24 @@ impl Sidebar {
 
 impl Render for Sidebar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let handle_new_chat = cx.listener(|this, _, _, cx| {
-            this.add_new_session(cx);
-        });
-        let handle_toggle = cx.listener(|this, _, _, cx| {
-            this.toggle_collapse(cx);
-        });
-        let handle_settings = cx.listener(|this, _, _, cx| {
-            this.open_settings(cx);
-        });
-
+        let handle_new_chat = cx.listener(|this, _, _, cx| this.add_new_session(cx));
+        let handle_toggle = cx.listener(|this, _, _, cx| this.toggle_collapse(cx));
+        let handle_settings = cx.listener(|this, _, _, cx| this.open_settings(cx));
+        let handle_search = cx.listener(|this, _, _, cx| this.toggle_search(cx));
+        let handle_view = cx.listener(|this, _, _, cx| this.toggle_view_options(cx));
+        let handle_workspace = cx.listener(|this, _, _, cx| this.toggle_workspace_menu(cx));
+        let handle_sort = cx.listener(|this, _, _, cx| this.toggle_sort(cx));
         let has_sessions = !self.sessions.is_empty();
         let collapsed = self.collapsed;
+        let query = self.search_input.read(cx).text().trim().to_lowercase();
+        let mut visible_sessions = self
+            .sessions
+            .iter()
+            .filter(|session| query.is_empty() || session.title.to_lowercase().contains(&query))
+            .collect::<Vec<_>>();
+        if self.sort_by_name {
+            visible_sessions.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+        }
 
         div()
             .when(collapsed, |this| this.w(px(56.0)))
@@ -145,7 +303,6 @@ impl Render for Sidebar {
                     .gap_3()
                     .px_3()
                     .py_1p5()
-                    // Logo row: brand wordmark + panel toggle
                     .child(
                         div()
                             .h(px(60.0))
@@ -187,14 +344,12 @@ impl Render for Sidebar {
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .text_color(rgb(0x61666b))
-                                    .hover(|s| s.bg(rgb(0xf1f3f5)).text_color(rgb(0x0f1115)))
+                                    .hover(|s| s.bg(rgb(0xf1f3f5)))
                                     .cursor_pointer()
-                                    .on_mouse_down(gpui::MouseButton::Left, handle_toggle)
+                                    .on_mouse_down(MouseButton::Left, handle_toggle)
                                     .child(icons::panel_left(16.0, rgb(0x61666b))),
                             ),
                     )
-                    // New session action
                     .child(
                         div()
                             .flex()
@@ -208,7 +363,7 @@ impl Render for Sidebar {
                             .border_color(rgb(0xe1e5eb))
                             .hover(|s| s.bg(rgb(0xf1f3f5)))
                             .cursor_pointer()
-                            .on_mouse_down(gpui::MouseButton::Left, handle_new_chat)
+                            .on_mouse_down(MouseButton::Left, handle_new_chat)
                             .when(collapsed, |this| this.justify_center().px_0())
                             .child(icons::new_chat(16.0, rgb(0x0f1115)))
                             .when(!collapsed, |this| {
@@ -221,79 +376,247 @@ impl Render for Sidebar {
                                 )
                             }),
                     )
-                    // Workspace section header
                     .when(!collapsed, |this| {
                         this.child(
                             div()
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .px_1()
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(rgb(0x61666b))
-                                        .child("工作区"),
-                                )
-                                .child(div().flex().items_center().gap_1().children(vec![
-                                            div()
-                                                .text_size(px(16.0))
-                                                .text_color(rgb(0x81858c))
-                                                .child("⌕")
-                                                .into_any_element(),
-                                            div()
-                                                .text_size(px(14.0))
-                                                .text_color(rgb(0x81858c))
-                                                .child("☷")
-                                                .into_any_element(),
-                                            icons::plus(14.0, rgb(0x61666b)).into_any_element(),
-                                        ])),
-                        )
-                    })
-                    // Sessions list or empty hint
-                    .when(!collapsed, |this| {
-                        this.child(if has_sessions {
-                            div()
+                                .relative()
                                 .flex()
                                 .flex_col()
-                                .gap_1()
-                                .children(self.sessions.iter().map(|sess| {
-                                    let is_act = sess.is_active;
-                                    let bg = if is_act { rgb(0xe9edf2) } else { rgb(0xf9fafb) };
-                                    let fg = if is_act { rgb(0x0f1115) } else { rgb(0x3f454d) };
-                                    let sess_id = sess.id.clone();
-                                    let handle_click = cx.listener(move |this, _, _, cx| {
-                                        this.select_session(&sess_id, cx);
-                                    });
-
+                                .gap_2()
+                                .child(
                                     div()
                                         .flex()
                                         .items_center()
-                                        .px_2p5()
-                                        .py_1p5()
-                                        .rounded_xl()
-                                        .bg(bg)
-                                        .hover(|s| s.bg(rgb(0xf1f3f5)))
-                                        .cursor_pointer()
-                                        .on_mouse_down(gpui::MouseButton::Left, handle_click)
+                                        .justify_between()
+                                        .px_1()
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(rgb(0x61666b))
+                                                .child("工作区"),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap_1()
+                                                .child(sidebar_icon("⌕", handle_search))
+                                                .child(sidebar_icon("☷", handle_view))
+                                                .child(sidebar_icon("+", handle_workspace)),
+                                        ),
+                                )
+                                .when(self.search_open, |this| {
+                                    this.child(
+                                        div()
+                                            .h(px(30.0))
+                                            .px_2()
+                                            .rounded(px(7.0))
+                                            .bg(rgb(0xffffff))
+                                            .border_1()
+                                            .border_color(rgb(0xe1e5eb))
+                                            .child(self.search_input.clone()),
+                                    )
+                                })
+                                .when(self.view_options_open, |this| {
+                                    this.child(deferred(
+                                        div()
+                                            .absolute()
+                                            .top(px(25.0))
+                                            .right(px(20.0))
+                                            .w(px(190.0))
+                                            .p_1()
+                                            .rounded_lg()
+                                            .bg(rgb(0xffffff))
+                                            .border_1()
+                                            .border_color(rgb(0xe1e5eb))
+                                            .shadow_lg()
+                                            .child(menu_item(
+                                                if self.sort_by_name {
+                                                    "按最近使用排序"
+                                                } else {
+                                                    "按名称排序"
+                                                },
+                                                handle_sort,
+                                            )),
+                                    ))
+                                })
+                                .when(self.workspace_menu_open, |this| {
+                                    this.child(deferred(workspace_menu(cx)))
+                                })
+                                .child(if has_sessions {
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .gap_1()
+                                        .children(visible_sessions.into_iter().map(|sess| {
+                                            let is_active = sess.is_active;
+                                            let session_id = sess.id.clone();
+                                            let menu_open = self.session_menu.as_deref()
+                                                == Some(session_id.as_str());
+                                            let renaming = self.renaming_session.as_deref()
+                                                == Some(session_id.as_str());
+                                            let handle_click = cx.listener({
+                                                let session_id = session_id.clone();
+                                                move |this, _, _, cx| {
+                                                    this.select_session(&session_id, cx);
+                                                }
+                                            });
+                                            let handle_more = cx.listener({
+                                                let session_id = session_id.clone();
+                                                move |this, _, _, cx| {
+                                                    this.toggle_session_menu(&session_id, cx);
+                                                }
+                                            });
+                                            let handle_rename = cx.listener({
+                                                let session_id = session_id.clone();
+                                                move |this, _, _, cx| {
+                                                    this.begin_rename(&session_id, cx);
+                                                }
+                                            });
+                                            let handle_duplicate = cx.listener({
+                                                let session_id = session_id.clone();
+                                                move |this, _, _, cx| {
+                                                    this.duplicate_session(&session_id, cx);
+                                                }
+                                            });
+                                            let handle_delete = cx.listener({
+                                                let session_id = session_id.clone();
+                                                move |this, _, _, cx| {
+                                                    this.delete_session(&session_id, cx);
+                                                }
+                                            });
+                                            let handle_commit = cx.listener(|this, _, _, cx| {
+                                                this.commit_rename(cx);
+                                            });
+                                            let bg = if is_active {
+                                                rgb(0xe9edf2)
+                                            } else {
+                                                rgb(0xf9fafb)
+                                            };
+                                            let fg = if is_active {
+                                                rgb(0x0f1115)
+                                            } else {
+                                                rgb(0x3f454d)
+                                            };
+                                            let action_button = if renaming {
+                                                div()
+                                                    .size(px(24.0))
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .rounded(px(6.0))
+                                                    .text_size(px(17.0))
+                                                    .text_color(rgb(0x81858c))
+                                                    .hover(|s| {
+                                                        s.bg(rgb(0xe1e5eb))
+                                                            .text_color(rgb(0x0f1115))
+                                                    })
+                                                    .cursor_pointer()
+                                                    .on_mouse_down(MouseButton::Left, handle_commit)
+                                                    .child("✓")
+                                                    .into_any_element()
+                                            } else {
+                                                div()
+                                                    .size(px(24.0))
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .rounded(px(6.0))
+                                                    .text_size(px(17.0))
+                                                    .text_color(rgb(0x81858c))
+                                                    .hover(|s| {
+                                                        s.bg(rgb(0xe1e5eb))
+                                                            .text_color(rgb(0x0f1115))
+                                                    })
+                                                    .cursor_pointer()
+                                                    .on_mouse_down(MouseButton::Left, handle_more)
+                                                    .child("⋯")
+                                                    .into_any_element()
+                                            };
+
+                                            div()
+                                                .relative()
+                                                .flex()
+                                                .items_center()
+                                                .gap_1()
+                                                .px_2p5()
+                                                .py_1p5()
+                                                .rounded_xl()
+                                                .bg(bg)
+                                                .hover(|s| s.bg(rgb(0xf1f3f5)))
+                                                .child(if renaming {
+                                                    div()
+                                                        .flex_1()
+                                                        .min_w(px(0.0))
+                                                        .h(px(28.0))
+                                                        .px_1()
+                                                        .bg(rgb(0xffffff))
+                                                        .border_1()
+                                                        .border_color(rgb(0x3964fe))
+                                                        .child(self.rename_input.clone())
+                                                        .into_any_element()
+                                                } else {
+                                                    div()
+                                                        .flex_1()
+                                                        .min_w(px(0.0))
+                                                        .overflow_hidden()
+                                                        .text_xs()
+                                                        .text_color(fg)
+                                                        .text_ellipsis()
+                                                        .cursor_pointer()
+                                                        .on_mouse_down(
+                                                            MouseButton::Left,
+                                                            handle_click,
+                                                        )
+                                                        .child(sess.title.clone())
+                                                        .into_any_element()
+                                                })
+                                                .child(action_button)
+                                                .when(menu_open, |this| {
+                                                    this.child(deferred(
+                                                        div()
+                                                            .absolute()
+                                                            .top(px(34.0))
+                                                            .right(px(4.0))
+                                                            .w(px(150.0))
+                                                            .p_1()
+                                                            .rounded_lg()
+                                                            .bg(rgb(0xffffff))
+                                                            .border_1()
+                                                            .border_color(rgb(0xe1e5eb))
+                                                            .shadow_lg()
+                                                            .flex()
+                                                            .flex_col()
+                                                            .child(menu_item(
+                                                                "重命名",
+                                                                handle_rename,
+                                                            ))
+                                                            .child(menu_item(
+                                                                "复制会话",
+                                                                handle_duplicate,
+                                                            ))
+                                                            .child(menu_item(
+                                                                "删除会话",
+                                                                handle_delete,
+                                                            )),
+                                                    ))
+                                                })
+                                                .into_any_element()
+                                        }))
+                                        .into_any_element()
+                                } else {
+                                    div()
+                                        .px_1()
+                                        .h(px(38.0))
                                         .text_xs()
-                                        .text_color(fg)
-                                        .child(sess.title.clone())
-                                }))
-                                .into_any_element()
-                        } else {
-                            div()
-                                .px_1()
-                                .h(px(38.0))
-                                .text_xs()
-                                .text_color(rgb(0x81858c))
-                                .child("暂无会话")
-                                .into_any_element()
-                        })
+                                        .text_color(rgb(0x81858c))
+                                        .child("暂无会话")
+                                        .into_any_element()
+                                }),
+                        )
                     }),
             )
-            // Footer: settings trigger
             .child(
                 div()
                     .flex()
@@ -305,7 +628,7 @@ impl Render for Sidebar {
                     .rounded_xl()
                     .hover(|s| s.bg(rgb(0xf1f3f5)))
                     .cursor_pointer()
-                    .on_mouse_down(gpui::MouseButton::Left, handle_settings)
+                    .on_mouse_down(MouseButton::Left, handle_settings)
                     .when(collapsed, |this| this.justify_center().px_0())
                     .child(icons::settings(16.0, rgb(0x61666b)))
                     .when(!collapsed, |this| {
@@ -313,4 +636,66 @@ impl Render for Sidebar {
                     }),
             )
     }
+}
+
+fn sidebar_icon(
+    glyph: &'static str,
+    handler: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+) -> impl IntoElement {
+    div()
+        .size(px(24.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(6.0))
+        .text_size(px(16.0))
+        .text_color(rgb(0x81858c))
+        .hover(|s| s.bg(rgb(0xe1e5eb)).text_color(rgb(0x0f1115)))
+        .cursor_pointer()
+        .on_mouse_down(MouseButton::Left, handler)
+        .child(glyph)
+}
+
+fn menu_item(
+    label: &'static str,
+    handler: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+) -> impl IntoElement {
+    div()
+        .h(px(30.0))
+        .px_2()
+        .flex()
+        .items_center()
+        .rounded(px(6.0))
+        .hover(|s| s.bg(rgb(0xf1f3f5)))
+        .cursor_pointer()
+        .on_mouse_down(MouseButton::Left, handler)
+        .text_xs()
+        .text_color(rgb(0x3f454d))
+        .child(label)
+}
+
+fn workspace_menu(cx: &mut Context<Sidebar>) -> impl IntoElement {
+    let workspaces = ["deepseek-harness-desktop", "zed-fluid"];
+    div()
+        .absolute()
+        .top(px(25.0))
+        .right(px(0.0))
+        .w(px(210.0))
+        .p_1()
+        .rounded_lg()
+        .bg(rgb(0xffffff))
+        .border_1()
+        .border_color(rgb(0xe1e5eb))
+        .shadow_lg()
+        .flex()
+        .flex_col()
+        .children(workspaces.into_iter().map(|workspace| {
+            let handle = cx.listener(move |this, _, _, cx| this.set_workspace(workspace, cx));
+            menu_item(workspace, handle).into_any_element()
+        }))
+        .child(div().h(px(1.0)).my_1().bg(rgb(0xe5e7eb)))
+        .child(menu_item(
+            "添加工作区…",
+            cx.listener(|this, _, _, cx| this.set_workspace("新工作区", cx)),
+        ))
 }
