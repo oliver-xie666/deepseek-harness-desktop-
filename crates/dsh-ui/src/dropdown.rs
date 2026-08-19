@@ -231,7 +231,14 @@ impl Render for AgentPresetSelector {
                     .text_color(text_muted())
                     .on_mouse_down(gpui::MouseButton::Left, handle_toggle)
                     .child(icons::agent_preset(16.0, text_muted()))
-                    .child(current.clone())
+                    .child(
+                        div()
+                            .max_w(px(170.0))
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .child(current.clone()),
+                    )
                     .child(icons::chevron_down(14.0, text_faint())),
             )
             // Floating preset menu
@@ -260,7 +267,7 @@ impl Render for AgentPresetSelector {
                             });
                             div()
                                 .flex()
-                                .items_center()
+                                .items_start()
                                 .justify_between()
                                 .gap_2()
                                 .px_2()
@@ -273,6 +280,8 @@ impl Render for AgentPresetSelector {
                                     div()
                                         .flex()
                                         .flex_col()
+                                        .flex_1()
+                                        .min_w(px(0.0))
                                         .gap_0p5()
                                         .child(
                                             div()
@@ -285,6 +294,7 @@ impl Render for AgentPresetSelector {
                                             div()
                                                 .text_size(px(12.0))
                                                 .text_color(text_faint())
+                                                .whitespace_normal()
                                                 .child(desc),
                                         ),
                                 )
