@@ -1,34 +1,57 @@
 use crate::icons;
-use gpui::{div, prelude::*, px, rgb, Context, FontWeight, IntoElement, Window};
+use dsh_common::AppPaths;
+use dsh_core::{AppConfig, AppState, McpServerConfig, McpTransport};
+use gpui::{
+    div, prelude::*, px, rgb, Context, Entity, FontWeight, IntoElement, MouseButton, Window,
+};
+use std::sync::Arc;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum SettingsTab {
     General,
     Models,
+    Plugins,
     AgentPresets,
 }
 
 pub struct SettingsModal {
     pub is_open: bool,
     pub active_tab: SettingsTab,
-    pub api_key: String,
-    pub base_url: String,
-    pub model_name: String,
+    pub config: AppConfig,
+    pub mcp_servers: Vec<McpServerConfig>,
+    pub model_editing: bool,
+    state: Entity<Arc<AppState>>,
 }
 
 impl SettingsModal {
-    pub fn new() -> Self {
+    pub fn new(state: Entity<Arc<AppState>>, cx: &mut Context<Self>) -> Self {
+        let state_arc = state.read(cx).clone();
+        let config = state_arc
+            .config
+            .try_read()
+            .map(|config| (*config).clone())
+            .unwrap_or_default();
+        let mcp_servers = state_arc
+            .mcp_servers
+            .try_read()
+            .map(|servers| (*servers).clone())
+            .unwrap_or_default();
+
         Self {
             is_open: false,
             active_tab: SettingsTab::General,
-            api_key: "sk-••••••••••••••••".into(),
-            base_url: "https://api.deepseek.com/v1".into(),
-            model_name: "deepseek-chat".into(),
+            config,
+            mcp_servers,
+            model_editing: false,
+            state,
         }
     }
 
     pub fn toggle(&mut self, cx: &mut Context<Self>) {
         self.is_open = !self.is_open;
+        if self.is_open {
+            self.reload_from_state(cx);
+        }
         cx.notify();
     }
 
@@ -39,22 +62,98 @@ impl SettingsModal {
 
     pub fn close(&mut self, cx: &mut Context<Self>) {
         self.is_open = false;
+        self.model_editing = false;
         cx.notify();
     }
-}
 
-impl SettingsModal {
+    fn reload_from_state(&mut self, cx: &mut Context<Self>) {
+        let state = self.state.read(cx).clone();
+        if let Ok(config) = state.config.try_read() {
+            self.config = (*config).clone();
+        }
+        let servers = state
+            .mcp_servers
+            .try_read()
+            .ok()
+            .map(|servers| (*servers).clone());
+        if let Some(servers) = servers {
+            self.mcp_servers = servers;
+        }
+    }
+
+    fn persist_config(&self, cx: &mut Context<Self>) {
+        let state = self.state.read(cx).clone();
+        let config = self.config.clone();
+        tokio::spawn(async move {
+            *state.config.write().await = config.clone();
+            let _ = config.save(&AppPaths::data_dir());
+        });
+    }
+
+    fn persist_mcp_servers(&self, cx: &mut Context<Self>) {
+        let state = self.state.read(cx).clone();
+        let servers = self.mcp_servers.clone();
+        tokio::spawn(async move {
+            *state.mcp_servers.write().await = servers.clone();
+            let _ = dsh_core::McpRegistry::save_servers(&AppPaths::data_dir(), &servers);
+        });
+    }
+
+    fn set_theme(&mut self, value: &str, cx: &mut Context<Self>) {
+        self.config.ui.theme = value.to_string();
+        self.persist_config(cx);
+        cx.notify();
+    }
+
+    fn set_language(&mut self, value: &str, cx: &mut Context<Self>) {
+        self.config.ui.language = value.to_string();
+        self.persist_config(cx);
+        cx.notify();
+    }
+
+    fn set_permission_mode(&mut self, value: &str, cx: &mut Context<Self>) {
+        self.config.ui.permission_mode = value.to_string();
+        self.persist_config(cx);
+        cx.notify();
+    }
+
+    fn set_agent_preset(&mut self, value: &str, cx: &mut Context<Self>) {
+        self.config.ui.agent_preset = value.to_string();
+        self.persist_config(cx);
+        cx.notify();
+    }
+
+    fn set_enter_behavior(&mut self, value: &str, cx: &mut Context<Self>) {
+        self.config.ui.enter_behavior = value.to_string();
+        self.persist_config(cx);
+        cx.notify();
+    }
+
+    fn set_model_name(&mut self, value: &str, cx: &mut Context<Self>) {
+        self.config.model.model_name = value.to_string();
+        self.persist_config(cx);
+        cx.notify();
+    }
+
+    fn toggle_model_editor(&mut self, cx: &mut Context<Self>) {
+        self.model_editing = !self.model_editing;
+        cx.notify();
+    }
+
+    fn toggle_mcp_server(&mut self, index: usize, cx: &mut Context<Self>) {
+        if let Some(server) = self.mcp_servers.get_mut(index) {
+            server.enabled = !server.enabled;
+            self.persist_mcp_servers(cx);
+            cx.notify();
+        }
+    }
+
     fn nav_rows(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let handle_general = cx.listener(|this, _, _, cx| {
-            this.set_tab(SettingsTab::General, cx);
-        });
-        let handle_models = cx.listener(|this, _, _, cx| {
-            this.set_tab(SettingsTab::Models, cx);
-        });
-        let handle_presets = cx.listener(|this, _, _, cx| {
-            this.set_tab(SettingsTab::AgentPresets, cx);
-        });
-
+        let handle_general = cx.listener(|this, _, _, cx| this.set_tab(SettingsTab::General, cx));
+        let handle_models = cx.listener(|this, _, _, cx| this.set_tab(SettingsTab::Models, cx));
+        let handle_plugins = cx.listener(|this, _, _, cx| this.set_tab(SettingsTab::Plugins, cx));
+        let handle_presets =
+            cx.listener(|this, _, _, cx| this.set_tab(SettingsTab::AgentPresets, cx));
         let active = self.active_tab;
 
         div()
@@ -76,77 +175,301 @@ impl SettingsModal {
             ))
             .child(nav_cell(
                 icons::agent_preset(16.0, rgb(0x61666b)),
+                "插件",
+                active == SettingsTab::Plugins,
+                handle_plugins,
+            ))
+            .child(nav_cell(
+                icons::agent_preset(16.0, rgb(0x61666b)),
                 "Agent 预设",
                 active == SettingsTab::AgentPresets,
                 handle_presets,
             ))
     }
 
-    fn general_body(&self) -> impl IntoElement {
+    fn general_body(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let language = self.config.ui.language.clone();
+        let theme = self.config.ui.theme.clone();
+        let permission = self.config.ui.permission_mode.clone();
+        let preset = self.config.ui.agent_preset.clone();
+        let enter_behavior = self.config.ui.enter_behavior.clone();
+
+        let handle_language_zh = cx.listener(|this, _, _, cx| this.set_language("zh-CN", cx));
+        let handle_language_en = cx.listener(|this, _, _, cx| this.set_language("en-US", cx));
+        let handle_light = cx.listener(|this, _, _, cx| this.set_theme("light", cx));
+        let handle_dark = cx.listener(|this, _, _, cx| this.set_theme("dark", cx));
+        let handle_system = cx.listener(|this, _, _, cx| this.set_theme("system", cx));
+        let handle_full = cx.listener(|this, _, _, cx| this.set_permission_mode("full-access", cx));
+        let handle_workspace =
+            cx.listener(|this, _, _, cx| this.set_permission_mode("workspace-write", cx));
+        let handle_read = cx.listener(|this, _, _, cx| this.set_permission_mode("read-only", cx));
+        let handle_standard = cx.listener(|this, _, _, cx| this.set_agent_preset("standard", cx));
+        let handle_ptc = cx.listener(|this, _, _, cx| this.set_agent_preset("code", cx));
+        let handle_minimal = cx.listener(|this, _, _, cx| this.set_agent_preset("minimal", cx));
+        let handle_cordis = cx.listener(|this, _, _, cx| this.set_agent_preset("cordis", cx));
+        let handle_queue = cx.listener(|this, _, _, cx| this.set_enter_behavior("queue", cx));
+        let handle_newline = cx.listener(|this, _, _, cx| this.set_enter_behavior("newline", cx));
+
         div()
             .flex()
             .flex_col()
-            .gap_4()
-            .child(section_label("语言"))
-            .child(field_row("显示语言", "简体中文"))
-            .child(section_label("外观"))
-            .child(field_row("主题", "浅色"))
+            .gap_1()
+            .child(page_heading("通用设置", "调整新会话、权限、语言和外观。"))
+            .child(setting_row(
+                "Agent 预设",
+                "新会话默认使用的 Agent 能力组合。",
+                div().flex().gap_1().children([
+                    choice_button("标准", preset == "standard", handle_standard).into_any_element(),
+                    choice_button("PTC", preset == "code", handle_ptc).into_any_element(),
+                    choice_button("极简", preset == "minimal", handle_minimal).into_any_element(),
+                    choice_button("创造", preset == "cordis", handle_cordis).into_any_element(),
+                ]),
+            ))
+            .child(setting_row(
+                "权限",
+                "控制 Agent 是否可以直接执行工具操作。",
+                div().flex().gap_1().children([
+                    choice_button("Full access", permission == "full-access", handle_full)
+                        .into_any_element(),
+                    choice_button(
+                        "Workspace Write",
+                        permission == "workspace-write",
+                        handle_workspace,
+                    )
+                    .into_any_element(),
+                    choice_button("Read Only", permission == "read-only", handle_read)
+                        .into_any_element(),
+                ]),
+            ))
+            .child(setting_row(
+                "语言",
+                "设置应用界面显示语言。",
+                div().flex().gap_1().children([
+                    choice_button("中文", language == "zh-CN", handle_language_zh)
+                        .into_any_element(),
+                    choice_button("English", language == "en-US", handle_language_en)
+                        .into_any_element(),
+                ]),
+            ))
+            .child(setting_row(
+                "外观",
+                "选择浅色、深色或跟随系统。",
+                div().flex().gap_1().children([
+                    choice_button("浅色", theme == "light", handle_light).into_any_element(),
+                    choice_button("深色", theme == "dark", handle_dark).into_any_element(),
+                    choice_button("跟随系统", theme == "system", handle_system).into_any_element(),
+                ]),
+            ))
+            .child(setting_row(
+                "繁忙时 Enter 键行为",
+                "Agent 工作时按 Enter 的处理方式。",
+                div().flex().gap_1().children([
+                    choice_button("排队发送", enter_behavior == "queue", handle_queue)
+                        .into_any_element(),
+                    choice_button("换行", enter_behavior == "newline", handle_newline)
+                        .into_any_element(),
+                ]),
+            ))
     }
 
-    fn models_body(&self) -> impl IntoElement {
+    fn models_body(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let editing = self.model_editing;
+        let model_name = self.config.model.model_name.clone();
+        let api_ready = !self.config.model.api_key.trim().is_empty();
+        let handle_edit = cx.listener(|this, _, _, cx| this.toggle_model_editor(cx));
+        let handle_luna = cx.listener(|this, _, _, cx| this.set_model_name("gpt-5.6-luna", cx));
+
         div()
             .flex()
             .flex_col()
-            .gap_4()
-            .child(section_label("DEEPSEEK API"))
-            .child(field_row("API Key", &self.api_key))
-            .child(field_row("Base URL", &self.base_url))
-            .child(field_row("模型", &self.model_name))
+            .gap_3()
+            .child(page_heading(
+                "模型",
+                "填入各提供方的 API 密钥即可使用其模型。",
+            ))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .p_4()
+                    .border_1()
+                    .border_color(rgb(0xe1e5eb))
+                    .bg(rgb(0xffffff))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .child("DeepSeek"),
+                                    )
+                                    .child(status_dot(api_ready)),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(rgb(0x61666b))
+                                    .child(if api_ready {
+                                        "API 密钥已配置"
+                                    } else {
+                                        "未配置 API 密钥"
+                                    }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .border_t_1()
+                            .border_color(rgb(0xe5e7eb))
+                            .pt_3()
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_1()
+                                    .child(
+                                        div().text_xs().text_color(rgb(0x61666b)).child("当前模型"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(rgb(0x0f1115))
+                                            .child(model_name.clone()),
+                                    ),
+                            )
+                            .child(action_button("编辑", handle_edit)),
+                    )
+                    .when(editing, |this| {
+                        this.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_2()
+                                .border_t_1()
+                                .border_color(rgb(0xe5e7eb))
+                                .pt_3()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(rgb(0x61666b))
+                                        .child("可用模型"),
+                                )
+                                .child(
+                                    div().flex().gap_1().children([choice_button(
+                                        "gpt-5.6-luna",
+                                        model_name == "gpt-5.6-luna",
+                                        handle_luna,
+                                    )
+                                    .into_any_element()]),
+                                ),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .p_3()
+                    .border_1()
+                    .border_color(rgb(0xe1e5eb))
+                    .bg(rgb(0xf9fafb))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(0x61666b))
+                            .child("支持添加自定义提供方"),
+                    )
+                    .child(div().text_xs().text_color(rgb(0x81858c)).child("即将支持")),
+            )
     }
 
-    fn presets_body(&self) -> impl IntoElement {
+    fn plugins_body(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(page_heading("插件", "配置和查看本地已安装的工具服务。"))
+            .child(div().flex().flex_col().gap_1().children(
+                self.mcp_servers.iter().enumerate().map(|(index, server)| {
+                    let handle =
+                        cx.listener(move |this, _, _, cx| this.toggle_mcp_server(index, cx));
+                    let enabled = server.enabled;
+                    let transport = match server.transport {
+                        McpTransport::Stdio => "stdio",
+                        McpTransport::Sse => "sse",
+                    };
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .p_3()
+                        .border_b_1()
+                        .border_color(rgb(0xe5e7eb))
+                        .hover(|s| s.bg(rgb(0xf9fafb)))
+                        .cursor_pointer()
+                        .on_mouse_down(MouseButton::Left, handle)
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .child(server.name.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(rgb(0x61666b))
+                                        .child(server.description.clone()),
+                                )
+                                .child(div().text_xs().text_color(rgb(0x81858c)).child(transport)),
+                        )
+                        .child(toggle_mark(enabled))
+                }),
+            ))
+    }
+
+    fn presets_body(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let current = self.config.ui.agent_preset.clone();
         let presets = [
-            (
-                "标准模式",
-                "功能完整的编码 Agent，支持文件编辑、Shell、文件与网页检索、Skills、计划、目标、子代理和工作流。",
-            ),
-            (
-                "PTC 模式",
-                "具备标准模式的全部能力，并通过 Code Mode SDK 呈现工具。",
-            ),
-            (
-                "极简模式",
-                "仅提供持久 bash 与 str_replace_editor 的双工具编码 Agent。",
-            ),
-            (
-                "创造模式",
-                "用于创建自定义 Agent preset，提供运行时检查、插件实验和创作指导。",
-            ),
+            ("标准模式", "standard", "功能完整的编码 Agent，支持文件编辑、Shell、文件与网页检索、Skills、计划、目标、子代理和工作流。"),
+            ("PTC 模式", "code", "具备标准模式的全部能力，并通过 Code Mode SDK 呈现工具。"),
+            ("极简模式", "minimal", "仅提供持久 bash 与 str_replace_editor 的双工具编码 Agent。"),
+            ("创造模式", "cordis", "用于创建自定义 Agent preset，并提供运行时检查与创作指导。"),
         ];
 
         div()
             .flex()
             .flex_col()
-            .gap_2()
-            .children(presets.into_iter().map(|(name, desc)| {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .p_3()
-                    .rounded_lg()
-                    .bg(rgb(0xf5f6f8))
-                    .border_1()
-                    .border_color(rgb(0xe1e5eb))
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(rgb(0x0f1115))
-                            .child(name),
-                    )
-                    .child(div().text_xs().text_color(rgb(0x61666b)).child(desc))
+            .gap_3()
+            .child(page_heading(
+                "Agent 预设",
+                "预设决定一个会话所运行的插件、提示词与能力。",
+            ))
+            .children(presets.into_iter().map(|(name, key, description)| {
+                let handle = cx.listener(move |this, _, _, cx| this.set_agent_preset(key, cx));
+                preset_card(name, description, current == key, handle)
             }))
+            .child(action_button(
+                "用创造模式创作自定义预设",
+                cx.listener(|this, _, _, cx| this.set_agent_preset("cordis", cx)),
+            ))
     }
 }
 
@@ -156,29 +479,32 @@ impl Render for SettingsModal {
             return div();
         }
 
-        let handle_close = cx.listener(|this, _, _, cx| {
-            this.close(cx);
-        });
+        let handle_close = cx.listener(|this, _, _, cx| this.close(cx));
+        let body = match self.active_tab {
+            SettingsTab::General => self.general_body(cx).into_any_element(),
+            SettingsTab::Models => self.models_body(cx).into_any_element(),
+            SettingsTab::Plugins => self.plugins_body(cx).into_any_element(),
+            SettingsTab::AgentPresets => self.presets_body(cx).into_any_element(),
+        };
 
         div()
             .absolute()
             .inset_0()
-            .bg(rgba_black())
+            .bg(gpui::rgba(0x00000066))
             .flex()
             .items_center()
             .justify_center()
             .child(
                 div()
-                    .w(px(800.0))
-                    .h(px(620.0))
-                    .rounded(px(24.0))
+                    .w(px(860.0))
+                    .h(px(640.0))
+                    .rounded(px(18.0))
                     .bg(rgb(0xffffff))
                     .border_1()
                     .border_color(rgb(0xe1e5eb))
                     .flex()
                     .overflow_hidden()
                     .shadow_lg()
-                    // Left nav rail
                     .child(
                         div()
                             .w(px(188.0))
@@ -199,21 +525,19 @@ impl Render for SettingsModal {
                             )
                             .child(self.nav_rows(cx)),
                     )
-                    // Content column
                     .child(
                         div()
                             .flex_1()
                             .h_full()
                             .flex()
                             .flex_col()
-                            // Header with close button
                             .child(
                                 div()
+                                    .h(px(48.0))
                                     .flex()
                                     .items_center()
                                     .justify_end()
                                     .px_3()
-                                    .py_2()
                                     .border_b_1()
                                     .border_color(rgb(0xe5e7eb))
                                     .child(
@@ -225,26 +549,16 @@ impl Render for SettingsModal {
                                             .justify_center()
                                             .hover(|s| s.bg(rgb(0xf1f3f5)))
                                             .cursor_pointer()
-                                            .on_mouse_down(gpui::MouseButton::Left, handle_close)
+                                            .on_mouse_down(MouseButton::Left, handle_close)
                                             .child(icons::close(14.0, rgb(0x81858c))),
                                     ),
                             )
-                            // Section body
-                            .child(div().flex_1().p_6().overflow_hidden().child(
-                                match self.active_tab {
-                                    SettingsTab::General => self.general_body().into_any_element(),
-                                    SettingsTab::Models => self.models_body().into_any_element(),
-                                    SettingsTab::AgentPresets => {
-                                        self.presets_body().into_any_element()
-                                    }
-                                },
-                            )),
+                            .child(div().flex_1().p_6().overflow_hidden().child(body)),
                     ),
             )
     }
 }
 
-/// A nav rail cell (icon + label), highlighted when active.
 fn nav_cell(
     icon: impl IntoElement,
     label: &str,
@@ -258,11 +572,11 @@ fn nav_cell(
         .w(px(164.0))
         .h(px(40.0))
         .px_3()
-        .rounded(px(12.0))
+        .rounded(px(10.0))
         .bg(if active { rgb(0xe9edf2) } else { rgb(0xf5f6f8) })
         .hover(|s| s.bg(rgb(0xf1f3f5)))
         .cursor_pointer()
-        .on_mouse_down(gpui::MouseButton::Left, handler)
+        .on_mouse_down(MouseButton::Left, handler)
         .child(icon)
         .child(
             div()
@@ -277,39 +591,190 @@ fn nav_cell(
         )
 }
 
-fn section_label(text: &str) -> impl IntoElement {
-    div()
-        .text_xs()
-        .font_weight(FontWeight::BOLD)
-        .text_color(rgb(0x61666b))
-        .child(text.to_string())
-}
-
-fn field_row(label: &str, value: &str) -> impl IntoElement {
+fn page_heading(title: &str, description: &str) -> impl IntoElement {
     div()
         .flex()
         .flex_col()
-        .gap_1p5()
+        .gap_1()
+        .pb_3()
         .child(
             div()
-                .text_xs()
+                .text_xl()
                 .font_weight(FontWeight::BOLD)
-                .text_color(rgb(0x61666b))
-                .child(label.to_string()),
+                .text_color(rgb(0x0f1115))
+                .child(title.to_string()),
         )
         .child(
             div()
-                .p_2p5()
-                .rounded_lg()
-                .bg(rgb(0xf5f6f8))
-                .border_1()
-                .border_color(rgb(0xe1e5eb))
                 .text_xs()
-                .text_color(rgb(0x3f454d))
-                .child(value.to_string()),
+                .text_color(rgb(0x61666b))
+                .child(description.to_string()),
         )
 }
 
-fn rgba_black() -> gpui::Rgba {
-    gpui::rgba(0x00000088)
+fn setting_row<R: IntoElement>(label: &str, description: &str, control: R) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_4()
+        .py_3()
+        .border_b_1()
+        .border_color(rgb(0xe5e7eb))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .flex_1()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(rgb(0x0f1115))
+                        .child(label.to_string()),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(rgb(0x61666b))
+                        .child(description.to_string()),
+                ),
+        )
+        .child(control)
+}
+
+fn choice_button(
+    label: &str,
+    selected: bool,
+    handler: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .justify_center()
+        .h(px(32.0))
+        .px_2p5()
+        .rounded(px(8.0))
+        .border_1()
+        .border_color(if selected {
+            rgb(0x3964fe)
+        } else {
+            rgb(0xe1e5eb)
+        })
+        .bg(if selected {
+            rgb(0xe8f0ff)
+        } else {
+            rgb(0xffffff)
+        })
+        .hover(|s| s.bg(rgb(0xf1f3f5)))
+        .cursor_pointer()
+        .on_mouse_down(MouseButton::Left, handler)
+        .text_xs()
+        .text_color(if selected {
+            rgb(0x2452d7)
+        } else {
+            rgb(0x3f454d)
+        })
+        .child(label.to_string())
+}
+
+fn action_button(
+    label: &str,
+    handler: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .justify_center()
+        .h(px(32.0))
+        .px_3()
+        .rounded(px(8.0))
+        .bg(rgb(0xf1f3f5))
+        .hover(|s| s.bg(rgb(0xe9edf2)))
+        .cursor_pointer()
+        .on_mouse_down(MouseButton::Left, handler)
+        .text_xs()
+        .text_color(rgb(0x3f454d))
+        .child(label.to_string())
+}
+
+fn preset_card(
+    name: &str,
+    description: &str,
+    selected: bool,
+    handler: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_3()
+        .p_3()
+        .rounded(px(10.0))
+        .border_1()
+        .border_color(if selected {
+            rgb(0x3964fe)
+        } else {
+            rgb(0xe1e5eb)
+        })
+        .bg(if selected {
+            rgb(0xf5f8ff)
+        } else {
+            rgb(0xffffff)
+        })
+        .hover(|s| s.bg(rgb(0xf9fafb)))
+        .cursor_pointer()
+        .on_mouse_down(MouseButton::Left, handler)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(rgb(0x0f1115))
+                        .child(name.to_string()),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(rgb(0x61666b))
+                        .child(description.to_string()),
+                ),
+        )
+        .child(if selected {
+            icons::check(16.0, rgb(0x3964fe)).into_any_element()
+        } else {
+            div().size(px(16.0)).into_any_element()
+        })
+}
+
+fn status_dot(configured: bool) -> impl IntoElement {
+    div().size(px(8.0)).rounded_full().bg(if configured {
+        rgb(0x16a34a)
+    } else {
+        rgb(0xd1d5db)
+    })
+}
+
+fn toggle_mark(enabled: bool) -> impl IntoElement {
+    div()
+        .size(px(22.0))
+        .rounded_full()
+        .bg(if enabled {
+            rgb(0x3964fe)
+        } else {
+            rgb(0xe1e5eb)
+        })
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(if enabled {
+            icons::check(12.0, rgb(0xffffff)).into_any_element()
+        } else {
+            div().size(px(8.0)).into_any_element()
+        })
 }
