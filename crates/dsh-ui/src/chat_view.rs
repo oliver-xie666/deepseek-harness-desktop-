@@ -2,13 +2,30 @@ use crate::details_drawer::DetailsDrawer;
 use crate::dropdown::{AgentPresetSelector, WorkspaceSelector};
 use crate::icons;
 use crate::text_input::TextInput;
+use dsh_common::AppPaths;
 use dsh_core::AppState;
 use dsh_markdown::{
     CodeHighlighter, InlineSpan, MarkdownBlock, StreamingMarkdownParser, TokenType,
 };
 use gpui::{div, prelude::*, px, rgb, rgba, Context, Entity, FontWeight, IntoElement, Window};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
+
+#[derive(Clone, Copy, PartialEq)]
+enum SessionView {
+    Chat,
+    Trace,
+}
+
+#[derive(Clone)]
+struct TraceEntry {
+    turn: usize,
+    kind: &'static str,
+    title: String,
+    detail: String,
+    duration_ms: u64,
+}
 
 pub struct ChatView {
     pub state: Entity<Arc<AppState>>,
@@ -24,6 +41,17 @@ pub struct ChatView {
     pub active_steps: usize,
     pub active_tool_ms: u64,
     pub streaming_text: String,
+    pub permission_open: bool,
+    pub model_open: bool,
+    pub permission_mode: String,
+    pub model_name: String,
+    active_view: SessionView,
+    pub session_log_open: bool,
+    pub trace_actual_duration: bool,
+    pub trace_all_collapsed: bool,
+    pub trace_collapsed_turns: HashSet<usize>,
+    trace_entries: Vec<TraceEntry>,
+    trace_search_input: Entity<TextInput>,
 }
 
 impl ChatView {
@@ -33,6 +61,7 @@ impl ChatView {
         cx: &mut Context<Self>,
     ) -> Self {
         let text_input = cx.new(|cx| TextInput::new("输入消息…", cx));
+        let trace_search_input = cx.new(|cx| TextInput::new("搜索轨迹…", cx));
         let workspace_selector = cx.new(|_| WorkspaceSelector::new());
         let preset_selector = cx.new(|_| AgentPresetSelector::new());
 
@@ -50,6 +79,17 @@ impl ChatView {
             active_steps: 0,
             active_tool_ms: 0,
             streaming_text: String::new(),
+            permission_open: false,
+            model_open: false,
+            permission_mode: "Full access".into(),
+            model_name: "gpt-5.6-luna".into(),
+            active_view: SessionView::Chat,
+            session_log_open: false,
+            trace_actual_duration: false,
+            trace_all_collapsed: false,
+            trace_collapsed_turns: HashSet::new(),
+            trace_entries: Vec::new(),
+            trace_search_input,
         };
 
         // AppState is shared with the Tokio WebSocket task, so bridge its
@@ -59,6 +99,22 @@ impl ChatView {
             let mut last_snapshot = String::new();
             loop {
                 tokio::time::sleep(Duration::from_millis(50)).await;
+
+                let config = state.config.read().await.clone();
+                let permission_mode = match config.ui.permission_mode.as_str() {
+                    "read-only" => "Read Only",
+                    "workspace-write" => "Workspace Write",
+                    _ => "Full access",
+                }
+                .to_string();
+                let model_name = config.model.model_name.clone();
+                let preset_name = match config.ui.agent_preset.as_str() {
+                    "code" => "PTC 模式",
+                    "minimal" => "极简模式",
+                    "cordis" => "创造模式",
+                    _ => "标准模式",
+                }
+                .to_string();
 
                 let snapshot = {
                     let active_id = state.active_session_id.read().await.clone();
@@ -77,10 +133,26 @@ impl ChatView {
                 };
 
                 let Some((session, text)) = snapshot else {
+                    let config_key =
+                        format!("config:{}:{}:{}", permission_mode, model_name, preset_name);
+                    if config_key != last_snapshot {
+                        last_snapshot = config_key;
+                        this.update(cx, |view, cx| {
+                            view.permission_mode = permission_mode.clone();
+                            view.model_name = model_name.clone();
+                            view.preset_selector.update(cx, |selector, cx| {
+                                selector.set_preset(&preset_name, cx);
+                            });
+                            cx.notify();
+                        })?;
+                    }
                     continue;
                 };
 
-                let snapshot_key = format!("{}:{}:{}", session.id, session.title, text);
+                let snapshot_key = format!(
+                    "{}:{}:{}:{}:{}:{}",
+                    session.id, session.title, text, permission_mode, model_name, preset_name
+                );
                 if snapshot_key == last_snapshot {
                     continue;
                 }
@@ -108,6 +180,56 @@ impl ChatView {
                     .map(|tool| tool.duration_ms)
                     .sum::<u64>();
 
+                let mut trace_entries = Vec::new();
+                let mut turn = 0;
+                for message in &session.messages {
+                    match message.sender {
+                        dsh_core::MessageSender::User => {
+                            turn += 1;
+                            trace_entries.push(TraceEntry {
+                                turn,
+                                kind: "USER",
+                                title: "Message".into(),
+                                detail: message.content.clone(),
+                                duration_ms: 0,
+                            });
+                        }
+                        dsh_core::MessageSender::Assistant => {
+                            trace_entries.push(TraceEntry {
+                                turn: turn.max(1),
+                                kind: "ASSISTANT",
+                                title: format!("Step {}", message.tool_calls.len().max(1)),
+                                detail: message.content.clone(),
+                                duration_ms: message
+                                    .tool_calls
+                                    .iter()
+                                    .map(|tool| tool.duration_ms)
+                                    .sum(),
+                            });
+                            for tool in &message.tool_calls {
+                                trace_entries.push(TraceEntry {
+                                    turn: turn.max(1),
+                                    kind: "TOOL",
+                                    title: tool.tool_name.clone(),
+                                    detail: tool
+                                        .output
+                                        .as_ref()
+                                        .map(|output| output.to_string())
+                                        .unwrap_or_else(|| tool.input.to_string()),
+                                    duration_ms: tool.duration_ms,
+                                });
+                            }
+                        }
+                        dsh_core::MessageSender::System => trace_entries.push(TraceEntry {
+                            turn: turn.max(1),
+                            kind: "SYSTEM",
+                            title: "Context".into(),
+                            detail: message.content.clone(),
+                            duration_ms: 0,
+                        }),
+                    }
+                }
+
                 this.update(cx, |view, cx| {
                     view.has_messages = !session.messages.is_empty();
                     view.has_active_session = view.has_messages || session.title != "新会话";
@@ -115,6 +237,11 @@ impl ChatView {
                     view.active_turns = turns;
                     view.active_steps = assistant_steps + tool_steps;
                     view.active_tool_ms = tool_ms;
+                    view.permission_mode = permission_mode.clone();
+                    view.model_name = model_name.clone();
+                    view.preset_selector.update(cx, |selector, cx| {
+                        selector.set_preset(&preset_name, cx);
+                    });
                     view.active_prompt = session
                         .messages
                         .iter()
@@ -122,6 +249,7 @@ impl ChatView {
                         .map(|message| message.content.clone())
                         .unwrap_or_default();
                     view.streaming_text = text;
+                    view.trace_entries = trace_entries;
                     cx.notify();
                 })?;
             }
@@ -176,6 +304,80 @@ impl ChatView {
             };
             let _ = state_arc.add_user_message(&session_id, &prompt_owned).await;
         });
+    }
+
+    fn toggle_permission(&mut self, cx: &mut Context<Self>) {
+        self.permission_open = !self.permission_open;
+        self.model_open = false;
+        cx.notify();
+    }
+
+    fn toggle_model(&mut self, cx: &mut Context<Self>) {
+        self.model_open = !self.model_open;
+        self.permission_open = false;
+        cx.notify();
+    }
+
+    fn set_permission(&mut self, value: &str, cx: &mut Context<Self>) {
+        self.permission_mode = value.to_string();
+        self.permission_open = false;
+        let config_value = match value {
+            "Read Only" => "read-only",
+            "Workspace Write" => "workspace-write",
+            _ => "full-access",
+        };
+        let state = self.state.read(cx).clone();
+        let config_value = config_value.to_string();
+        tokio::spawn(async move {
+            let mut config = state.config.write().await;
+            config.ui.permission_mode = config_value;
+            let _ = config.save(&AppPaths::data_dir());
+        });
+        cx.notify();
+    }
+
+    fn set_session_view(&mut self, view: SessionView, cx: &mut Context<Self>) {
+        self.active_view = view;
+        self.session_log_open = false;
+        self.permission_open = false;
+        self.model_open = false;
+        cx.notify();
+    }
+
+    fn toggle_session_log(&mut self, cx: &mut Context<Self>) {
+        self.session_log_open = !self.session_log_open;
+        cx.notify();
+    }
+
+    fn toggle_trace_duration(&mut self, cx: &mut Context<Self>) {
+        self.trace_actual_duration = !self.trace_actual_duration;
+        cx.notify();
+    }
+
+    fn toggle_trace_all(&mut self, cx: &mut Context<Self>) {
+        self.trace_all_collapsed = !self.trace_all_collapsed;
+        self.trace_collapsed_turns.clear();
+        cx.notify();
+    }
+
+    fn toggle_trace_turn(&mut self, turn: usize, cx: &mut Context<Self>) {
+        if !self.trace_collapsed_turns.insert(turn) {
+            self.trace_collapsed_turns.remove(&turn);
+        }
+        cx.notify();
+    }
+
+    fn set_model(&mut self, value: &str, cx: &mut Context<Self>) {
+        self.model_name = value.to_string();
+        self.model_open = false;
+        let state = self.state.read(cx).clone();
+        let model_name = value.to_string();
+        tokio::spawn(async move {
+            let mut config = state.config.write().await;
+            config.model.model_name = model_name;
+            let _ = config.save(&AppPaths::data_dir());
+        });
+        cx.notify();
     }
 
     fn render_markdown_block(&self, block: MarkdownBlock) -> impl IntoElement {
@@ -417,14 +619,14 @@ impl ChatView {
                                                     .cursor_pointer()
                                                     .child(icons::plus(14.0, rgb(0x61666b))),
                                             )
-                                            .child(self.render_access_selector()),
+                                            .child(self.render_access_selector(cx)),
                                     )
                                     .child(
                                         div()
                                             .flex()
                                             .items_center()
                                             .gap_3()
-                                            .child(self.render_model_selector())
+                                            .child(self.render_model_selector(cx))
                                             .child(
                                                 div()
                                                     .size(px(34.0))
@@ -450,12 +652,18 @@ impl ChatView {
             )
     }
 
-    fn render_session_header(&self) -> impl IntoElement {
+    fn render_session_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let title = if self.active_session_title.is_empty() {
             "新会话"
         } else {
             &self.active_session_title
         };
+        let active_view = self.active_view;
+        let handle_chat =
+            cx.listener(|this, _, _, cx| this.set_session_view(SessionView::Chat, cx));
+        let handle_trace =
+            cx.listener(|this, _, _, cx| this.set_session_view(SessionView::Trace, cx));
+        let handle_log = cx.listener(|this, _, _, cx| this.toggle_session_log(cx));
 
         div()
             .w_full()
@@ -482,9 +690,7 @@ impl ChatView {
                                     .text_color(rgb(0x0f1115))
                                     .child(title.to_string()),
                             )
-                            .child(icons::agent_preset(14.0, rgb(0x61666b)))
-                            .child(div().text_xs().text_color(rgb(0x61666b)).child("PTC 模式"))
-                            .child(icons::chevron_down(12.0, rgb(0x81858c))),
+                            .child(self.preset_selector.clone()),
                     )
                     .child(
                         div()
@@ -495,9 +701,32 @@ impl ChatView {
                             .border_color(rgb(0xe1e5eb))
                             .text_xs()
                             .text_color(rgb(0x61666b))
-                            .child("Session log ↓"),
+                            .hover(|s| s.bg(rgb(0xf1f3f5)))
+                            .cursor_pointer()
+                            .on_mouse_down(gpui::MouseButton::Left, handle_log)
+                            .child(if self.session_log_open {
+                                "Session log ↑"
+                            } else {
+                                "Session log ↓"
+                            }),
                     ),
             )
+            .when(self.session_log_open, |this| {
+                this.child(
+                    div()
+                        .px_4()
+                        .py_2()
+                        .bg(rgb(0xf9fafb))
+                        .border_b_1()
+                        .border_color(rgb(0xe5e7eb))
+                        .text_xs()
+                        .text_color(rgb(0x61666b))
+                        .child(format!(
+                            "当前会话记录 · {} 条轨迹",
+                            self.trace_entries.len()
+                        )),
+                )
+            })
             .child(
                 div()
                     .h(px(30.0))
@@ -511,9 +740,19 @@ impl ChatView {
                             .flex()
                             .items_center()
                             .border_b_2()
-                            .border_color(rgb(0x3964fe))
+                            .border_color(if active_view == SessionView::Chat {
+                                rgb(0x3964fe)
+                            } else {
+                                rgb(0xffffff)
+                            })
                             .text_xs()
-                            .text_color(rgb(0x3964fe))
+                            .text_color(if active_view == SessionView::Chat {
+                                rgb(0x3964fe)
+                            } else {
+                                rgb(0x81858c)
+                            })
+                            .cursor_pointer()
+                            .on_mouse_down(gpui::MouseButton::Left, handle_chat)
                             .child("对话"),
                     )
                     .child(
@@ -521,50 +760,140 @@ impl ChatView {
                             .h_full()
                             .flex()
                             .items_center()
+                            .border_b_2()
+                            .border_color(if active_view == SessionView::Trace {
+                                rgb(0x3964fe)
+                            } else {
+                                rgb(0xffffff)
+                            })
                             .text_xs()
-                            .text_color(rgb(0x81858c))
+                            .text_color(if active_view == SessionView::Trace {
+                                rgb(0x3964fe)
+                            } else {
+                                rgb(0x81858c)
+                            })
+                            .cursor_pointer()
+                            .on_mouse_down(gpui::MouseButton::Left, handle_trace)
                             .child("轨迹"),
                     ),
             )
     }
 
-    fn render_access_selector(&self) -> impl IntoElement {
+    fn render_access_selector(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let current = self.permission_mode.clone();
+        let is_open = self.permission_open;
+        let handle_toggle = cx.listener(|this, _, _, cx| this.toggle_permission(cx));
+        let handle_full = cx.listener(|this, _, _, cx| this.set_permission("Full access", cx));
+        let handle_workspace =
+            cx.listener(|this, _, _, cx| this.set_permission("Workspace Write", cx));
+        let handle_read = cx.listener(|this, _, _, cx| this.set_permission("Read Only", cx));
+
         div()
-            .h(px(28.0))
-            .flex()
-            .items_center()
-            .gap_1()
-            .px_1p5()
-            .rounded_md()
-            .hover(|s| s.bg(rgb(0xf1f3f5)))
-            .cursor_pointer()
-            .child(icons::check(14.0, rgb(0x61666b)))
+            .relative()
             .child(
                 div()
-                    .text_xs()
-                    .text_color(rgb(0x3f454d))
-                    .child("Full access"),
+                    .h(px(28.0))
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .px_1p5()
+                    .rounded_md()
+                    .hover(|s| s.bg(rgb(0xf1f3f5)))
+                    .cursor_pointer()
+                    .on_mouse_down(gpui::MouseButton::Left, handle_toggle)
+                    .child(icons::check(14.0, rgb(0x61666b)))
+                    .child(div().text_xs().text_color(rgb(0x3f454d)).child(current))
+                    .child(icons::chevron_down(12.0, rgb(0x81858c))),
             )
-            .child(icons::chevron_down(12.0, rgb(0x81858c)))
+            .when(is_open, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .bottom(px(34.0))
+                        .left(px(0.0))
+                        .w(px(190.0))
+                        .p_1()
+                        .rounded_lg()
+                        .bg(rgb(0xffffff))
+                        .border_1()
+                        .border_color(rgb(0xe1e5eb))
+                        .shadow_lg()
+                        .flex()
+                        .flex_col()
+                        .children([
+                            menu_choice(
+                                "Full access",
+                                self.permission_mode == "Full access",
+                                handle_full,
+                            )
+                            .into_any_element(),
+                            menu_choice(
+                                "Workspace Write",
+                                self.permission_mode == "Workspace Write",
+                                handle_workspace,
+                            )
+                            .into_any_element(),
+                            menu_choice(
+                                "Read Only",
+                                self.permission_mode == "Read Only",
+                                handle_read,
+                            )
+                            .into_any_element(),
+                        ]),
+                )
+            })
     }
 
-    fn render_model_selector(&self) -> impl IntoElement {
+    fn render_model_selector(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let current = self.model_name.clone();
+        let is_open = self.model_open;
+        let handle_toggle = cx.listener(|this, _, _, cx| this.toggle_model(cx));
+        let handle_luna = cx.listener(|this, _, _, cx| this.set_model("gpt-5.6-luna", cx));
+
         div()
-            .h(px(28.0))
-            .flex()
-            .items_center()
-            .gap_1()
-            .px_1p5()
-            .rounded_md()
-            .hover(|s| s.bg(rgb(0xf1f3f5)))
-            .cursor_pointer()
+            .relative()
             .child(
                 div()
-                    .text_xs()
-                    .text_color(rgb(0x3f454d))
-                    .child("gpt-5.6-luna"),
+                    .h(px(28.0))
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .px_1p5()
+                    .rounded_md()
+                    .hover(|s| s.bg(rgb(0xf1f3f5)))
+                    .cursor_pointer()
+                    .on_mouse_down(gpui::MouseButton::Left, handle_toggle)
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(0x3f454d))
+                            .child(current.clone()),
+                    )
+                    .child(icons::chevron_down(12.0, rgb(0x81858c))),
             )
-            .child(icons::chevron_down(12.0, rgb(0x81858c)))
+            .when(is_open, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .bottom(px(34.0))
+                        .right(px(0.0))
+                        .w(px(190.0))
+                        .p_1()
+                        .rounded_lg()
+                        .bg(rgb(0xffffff))
+                        .border_1()
+                        .border_color(rgb(0xe1e5eb))
+                        .shadow_lg()
+                        .flex()
+                        .flex_col()
+                        .children([menu_choice(
+                            "gpt-5.6-luna",
+                            current == "gpt-5.6-luna",
+                            handle_luna,
+                        )
+                        .into_any_element()]),
+                )
+            })
     }
 
     fn render_stats_line(&self) -> impl IntoElement {
@@ -590,7 +919,221 @@ impl ChatView {
             ))
     }
 
+    fn render_trace(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let query = self.trace_search_input.read(cx).text().to_lowercase();
+        let mut turns = Vec::new();
+        for entry in &self.trace_entries {
+            if (!query.is_empty()
+                && !format!("{} {} {}", entry.kind, entry.title, entry.detail)
+                    .to_lowercase()
+                    .contains(&query))
+                || turns.contains(&entry.turn)
+            {
+                continue;
+            }
+            turns.push(entry.turn);
+        }
+
+        let handle_duration = cx.listener(|this, _, _, cx| this.toggle_trace_duration(cx));
+        let handle_collapse = cx.listener(|this, _, _, cx| this.toggle_trace_all(cx));
+        let mut rows = Vec::new();
+        for turn in turns {
+            let entries = self
+                .trace_entries
+                .iter()
+                .filter(|entry| {
+                    entry.turn == turn
+                        && (query.is_empty()
+                            || format!("{} {} {}", entry.kind, entry.title, entry.detail)
+                                .to_lowercase()
+                                .contains(&query))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            let collapsed = self.trace_all_collapsed || self.trace_collapsed_turns.contains(&turn);
+            let handle_turn = cx.listener(move |this, _, _, cx| this.toggle_trace_turn(turn, cx));
+            rows.push(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .px_3()
+                    .py_2()
+                    .bg(rgb(0xf5f6f8))
+                    .border_b_1()
+                    .border_color(rgb(0xe5e7eb))
+                    .hover(|s| s.bg(rgb(0xf1f3f5)))
+                    .cursor_pointer()
+                    .on_mouse_down(gpui::MouseButton::Left, handle_turn)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(if collapsed { "▸" } else { "▾" })
+                            .child(format!("回合 {}", turn)),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(0x81858c))
+                            .child(format!("{} 步", entries.len())),
+                    )
+                    .into_any_element(),
+            );
+
+            if !collapsed {
+                for entry in entries {
+                    let drawer_entity = self.details_drawer.clone();
+                    let title = entry.title.clone();
+                    let detail = entry.detail.clone();
+                    let kind = entry.kind.to_string();
+                    let duration = entry.duration_ms;
+                    let handle_entry = cx.listener(move |_this, _, _, cx| {
+                        drawer_entity.update(cx, |drawer, cx| {
+                            drawer.open_tool(&kind, duration, &detail, &title, cx);
+                        });
+                    });
+                    let duration_label = if self.trace_actual_duration {
+                        format!("{}ms", entry.duration_ms)
+                    } else {
+                        "--".to_string()
+                    };
+                    rows.push(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .px_3()
+                            .py_2()
+                            .border_b_1()
+                            .border_color(rgb(0xf0f1f3))
+                            .hover(|s| s.bg(rgb(0xf9fafb)))
+                            .cursor_pointer()
+                            .on_mouse_down(gpui::MouseButton::Left, handle_entry)
+                            .child(
+                                div()
+                                    .w(px(64.0))
+                                    .text_xs()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(if entry.kind == "TOOL" {
+                                        rgb(0x3964fe)
+                                    } else {
+                                        rgb(0x81858c)
+                                    })
+                                    .child(entry.kind),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.0))
+                                    .overflow_hidden()
+                                    .text_xs()
+                                    .text_color(rgb(0x3f454d))
+                                    .text_ellipsis()
+                                    .child(entry.title),
+                            )
+                            .child(
+                                div()
+                                    .w(px(50.0))
+                                    .text_xs()
+                                    .text_color(rgb(0x81858c))
+                                    .child(duration_label),
+                            )
+                            .into_any_element(),
+                    );
+                }
+            }
+        }
+
+        div()
+            .flex_1()
+            .overflow_hidden()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .px_4()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(rgb(0xe5e7eb))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded(px(6.0))
+                                    .bg(if self.trace_actual_duration {
+                                        rgb(0xe8f0ff)
+                                    } else {
+                                        rgb(0xf1f3f5)
+                                    })
+                                    .text_xs()
+                                    .text_color(rgb(0x3f454d))
+                                    .cursor_pointer()
+                                    .on_mouse_down(gpui::MouseButton::Left, handle_duration)
+                                    .child(if self.trace_actual_duration {
+                                        "实际时长"
+                                    } else {
+                                        "等宽时长"
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded(px(6.0))
+                                    .bg(rgb(0xf1f3f5))
+                                    .text_xs()
+                                    .text_color(rgb(0x3f454d))
+                                    .cursor_pointer()
+                                    .on_mouse_down(gpui::MouseButton::Left, handle_collapse)
+                                    .child(if self.trace_all_collapsed {
+                                        "展开回合"
+                                    } else {
+                                        "收起回合"
+                                    }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w(px(180.0))
+                            .h(px(30.0))
+                            .px_2()
+                            .border_1()
+                            .border_color(rgb(0xe1e5eb))
+                            .rounded(px(6.0))
+                            .child(self.trace_search_input.clone()),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .overflow_hidden()
+                    .flex()
+                    .flex_col()
+                    .children(rows),
+            )
+    }
+
     fn render_active_messages(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.active_view == SessionView::Trace {
+            return div()
+                .flex_1()
+                .overflow_hidden()
+                .flex()
+                .flex_col()
+                .child(self.render_session_header(cx))
+                .child(self.render_trace(cx));
+        }
         let user_prompt = if self.active_prompt.is_empty() {
             "请帮我用 Rust + GPUI 重构 DeepSeek Harness 桌面端"
         } else {
@@ -615,7 +1158,7 @@ impl ChatView {
             .overflow_hidden()
             .flex()
             .flex_col()
-            .child(self.render_session_header())
+            .child(self.render_session_header(cx))
             .child(
                 div()
                     .flex_1()
@@ -740,14 +1283,14 @@ impl Render for ChatView {
                                                         .cursor_pointer()
                                                         .child(icons::plus(14.0, rgb(0x61666b))),
                                                 )
-                                                .child(self.render_access_selector()),
+                                                .child(self.render_access_selector(cx)),
                                         )
                                         .child(
                                             div()
                                                 .flex()
                                                 .items_center()
                                                 .gap_3()
-                                                .child(self.render_model_selector())
+                                                .child(self.render_model_selector(cx))
                                                 .child(
                                                     div()
                                                         .size(px(34.0))
@@ -774,4 +1317,30 @@ impl Render for ChatView {
                 )
             })
     }
+}
+
+fn menu_choice(
+    label: &str,
+    selected: bool,
+    handler: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_2()
+        .px_2()
+        .py_1p5()
+        .rounded_md()
+        .hover(|s| s.bg(rgb(0xf1f3f5)))
+        .cursor_pointer()
+        .on_mouse_down(gpui::MouseButton::Left, handler)
+        .text_xs()
+        .text_color(rgb(0x3f454d))
+        .child(label.to_string())
+        .child(if selected {
+            icons::check(14.0, rgb(0x3964fe)).into_any_element()
+        } else {
+            div().size(px(14.0)).into_any_element()
+        })
 }
