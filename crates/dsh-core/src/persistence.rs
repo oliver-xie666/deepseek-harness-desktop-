@@ -47,6 +47,16 @@ impl SessionPersistence {
 
         Ok(sessions)
     }
+
+    pub fn delete_session(storage_dir: &Path, session_id: &str) -> Result<()> {
+        let session_file = storage_dir
+            .join("sessions")
+            .join(format!("{session_id}.json"));
+        if session_file.exists() {
+            fs::remove_file(session_file)?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -62,6 +72,8 @@ mod tests {
             id: "test-sess-1".into(),
             title: "Test Persistence".into(),
             workspace_path: "/tmp/workspace".into(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
             messages: Vec::new(),
             diffs: std::collections::HashMap::new(),
             terminal_logs: vec!["Log 1".into()],
@@ -75,5 +87,30 @@ mod tests {
         assert_eq!(loaded[0].id, "test-sess-1");
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn delete_session_removes_only_requested_file() {
+        let temp_dir = env::temp_dir().join(format!("dsh_persist_{}", uuid::Uuid::new_v4()));
+        let make_session = |id: &str| Session {
+            id: id.into(),
+            title: id.into(),
+            workspace_path: "/tmp/workspace".into(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            messages: Vec::new(),
+            diffs: std::collections::HashMap::new(),
+            terminal_logs: Vec::new(),
+            agent_state: None,
+        };
+
+        SessionPersistence::save_session(&temp_dir, &make_session("one")).unwrap();
+        SessionPersistence::save_session(&temp_dir, &make_session("two")).unwrap();
+        SessionPersistence::delete_session(&temp_dir, "one").unwrap();
+
+        let loaded = SessionPersistence::load_all_sessions(&temp_dir).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, "two");
+        let _ = fs::remove_dir_all(temp_dir);
     }
 }
