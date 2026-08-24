@@ -119,6 +119,14 @@ impl ChatView {
                 }
                 .to_string();
 
+                let should_submit = this.update(cx, |view, cx| {
+                    view.text_input
+                        .update(cx, |input, cx| input.take_submit_requested(cx))
+                })?;
+                if should_submit {
+                    this.update(cx, |view, cx| view.submit_current_input(cx))?;
+                }
+
                 let snapshot = {
                     let active_id = state.active_session_id.read().await.clone();
                     let sessions = state.sessions.read().await;
@@ -146,6 +154,9 @@ impl ChatView {
                         this.update(cx, |view, cx| {
                             view.permission_mode = permission_mode.clone();
                             view.model_name = model_name.clone();
+                            view.text_input.update(cx, |input, cx| {
+                                input.set_enter_behavior(&config.ui.enter_behavior, cx)
+                            });
                             view.preset_selector.update(cx, |selector, cx| {
                                 selector.set_preset(&preset_name, cx);
                             });
@@ -253,6 +264,9 @@ impl ChatView {
                     view.active_tool_ms = tool_ms;
                     view.permission_mode = permission_mode.clone();
                     view.model_name = model_name.clone();
+                    view.text_input.update(cx, |input, cx| {
+                        input.set_enter_behavior(&config.ui.enter_behavior, cx)
+                    });
                     view.preset_selector.update(cx, |selector, cx| {
                         selector.set_preset(&preset_name, cx);
                     });

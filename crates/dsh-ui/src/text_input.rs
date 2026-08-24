@@ -17,6 +17,8 @@ pub struct TextInput {
     last_layouts: Vec<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
     is_selecting: bool,
+    enter_behavior: String,
+    submit_requested: bool,
 }
 
 impl TextInput {
@@ -31,6 +33,8 @@ impl TextInput {
             last_layouts: Vec::new(),
             last_bounds: None,
             is_selecting: false,
+            enter_behavior: "queue".into(),
+            submit_requested: false,
         }
     }
 
@@ -52,6 +56,20 @@ impl TextInput {
         self.selection_reversed = false;
         self.cursor_visible = true;
         cx.notify();
+    }
+
+    pub fn set_enter_behavior(&mut self, behavior: &str, cx: &mut Context<Self>) {
+        self.enter_behavior = behavior.to_string();
+        cx.notify();
+    }
+
+    pub fn take_submit_requested(&mut self, cx: &mut Context<Self>) -> bool {
+        let requested = self.submit_requested;
+        self.submit_requested = false;
+        if requested {
+            cx.notify();
+        }
+        requested
     }
 
     fn move_left(&mut self, cx: &mut Context<Self>) {
@@ -213,6 +231,10 @@ impl TextInput {
             "end" => {
                 self.move_to(self.content.len(), cx);
                 self.reset_cursor(cx);
+            }
+            "enter" if self.enter_behavior == "queue" => {
+                self.submit_requested = true;
+                cx.notify();
             }
             "enter" => self.insert("\n", cx),
             "a" if ev.keystroke.modifiers.control || ev.keystroke.modifiers.platform => {
