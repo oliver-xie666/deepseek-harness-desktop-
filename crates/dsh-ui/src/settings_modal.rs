@@ -466,8 +466,18 @@ impl SettingsModal {
                 "预设决定一个会话所运行的插件、提示词与能力。",
             ))
             .children(presets.into_iter().map(|(name, key, description)| {
-                let handle = cx.listener(move |this, _, _, cx| this.set_agent_preset(key, cx));
-                preset_card(name, description, current == key, handle)
+                let handle_select =
+                    cx.listener(move |this, _, _, cx| this.set_agent_preset(key, cx));
+                let handle_copy = cx.listener(move |_this, _, _, cx| {
+                    cx.write_to_clipboard(name.to_string().into());
+                });
+                preset_card(
+                    name,
+                    description,
+                    current == key,
+                    handle_select,
+                    handle_copy,
+                )
             }))
             .child(action_button(
                 "用创造模式创作自定义预设",
@@ -706,7 +716,8 @@ fn preset_card(
     name: &str,
     description: &str,
     selected: bool,
-    handler: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+    select_handler: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+    copy_handler: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
 ) -> impl IntoElement {
     div()
         .flex()
@@ -728,7 +739,7 @@ fn preset_card(
         })
         .hover(|s| s.bg(rgb(0xf9fafb)))
         .cursor_pointer()
-        .on_mouse_down(MouseButton::Left, handler)
+        .on_mouse_down(MouseButton::Left, select_handler)
         .child(
             div()
                 .flex()
@@ -748,11 +759,18 @@ fn preset_card(
                         .child(description.to_string()),
                 ),
         )
-        .child(if selected {
-            icons::check(16.0, rgb(0x3964fe)).into_any_element()
-        } else {
-            div().size(px(16.0)).into_any_element()
-        })
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(if selected {
+                    icons::check(16.0, rgb(0x3964fe)).into_any_element()
+                } else {
+                    div().size(px(16.0)).into_any_element()
+                })
+                .child(action_button("复制", copy_handler)),
+        )
 }
 
 fn status_dot(configured: bool) -> impl IntoElement {
