@@ -24,6 +24,8 @@ struct TraceEntry {
     kind: &'static str,
     title: String,
     detail: String,
+    args: String,
+    output: String,
     duration_ms: u64,
 }
 
@@ -125,6 +127,9 @@ impl ChatView {
                             let text = session
                                 .messages
                                 .iter()
+                                .filter(|message| {
+                                    matches!(message.sender, dsh_core::MessageSender::Assistant)
+                                })
                                 .map(|message| message.content.as_str())
                                 .collect::<Vec<_>>()
                                 .join("\n\n");
@@ -191,6 +196,8 @@ impl ChatView {
                                 kind: "USER",
                                 title: "Message".into(),
                                 detail: message.content.clone(),
+                                args: String::new(),
+                                output: String::new(),
                                 duration_ms: 0,
                             });
                         }
@@ -200,6 +207,8 @@ impl ChatView {
                                 kind: "ASSISTANT",
                                 title: format!("Step {}", message.tool_calls.len().max(1)),
                                 detail: message.content.clone(),
+                                args: String::new(),
+                                output: message.content.clone(),
                                 duration_ms: message
                                     .tool_calls
                                     .iter()
@@ -211,11 +220,13 @@ impl ChatView {
                                     turn: turn.max(1),
                                     kind: "TOOL",
                                     title: tool.tool_name.clone(),
-                                    detail: tool
+                                    detail: tool.tool_name.clone(),
+                                    args: tool.input.to_string(),
+                                    output: tool
                                         .output
                                         .as_ref()
-                                        .map(|output| output.to_string())
-                                        .unwrap_or_else(|| tool.input.to_string()),
+                                        .map(ToString::to_string)
+                                        .unwrap_or_else(|| "等待工具返回".into()),
                                     duration_ms: tool.duration_ms,
                                 });
                             }
@@ -225,6 +236,8 @@ impl ChatView {
                             kind: "SYSTEM",
                             title: "Context".into(),
                             detail: message.content.clone(),
+                            args: String::new(),
+                            output: message.content.clone(),
                             duration_ms: 0,
                         }),
                     }
@@ -278,11 +291,10 @@ impl ChatView {
 
     pub fn submit_current_input(&mut self, cx: &mut Context<Self>) {
         let text = self.text_input.read(cx).text().trim().to_string();
-        let prompt = if text.is_empty() {
-            "请帮我用 Rust + GPUI 重构 DeepSeek Harness 桌面端".to_string()
-        } else {
-            text
-        };
+        if text.is_empty() {
+            return;
+        }
+        let prompt = text;
 
         self.has_messages = true;
         self.active_prompt = prompt.clone();
@@ -986,12 +998,12 @@ impl ChatView {
                 for entry in entries {
                     let drawer_entity = self.details_drawer.clone();
                     let title = entry.title.clone();
-                    let detail = entry.detail.clone();
-                    let kind = entry.kind.to_string();
+                    let args = entry.args.clone();
+                    let output = entry.output.clone();
                     let duration = entry.duration_ms;
                     let handle_entry = cx.listener(move |_this, _, _, cx| {
                         drawer_entity.update(cx, |drawer, cx| {
-                            drawer.open_tool(&kind, duration, &detail, &title, cx);
+                            drawer.open_tool(&title, duration, &args, &output, cx);
                         });
                     });
                     let duration_label = if self.trace_actual_duration {
@@ -1135,23 +1147,17 @@ impl ChatView {
                 .child(self.render_trace(cx));
         }
         let user_prompt = if self.active_prompt.is_empty() {
-            "请帮我用 Rust + GPUI 重构 DeepSeek Harness 桌面端"
+            "暂无消息"
         } else {
             &self.active_prompt
         };
 
-        let drawer_entity = self.details_drawer.clone();
-        let handle_tool_click = cx.listener(move |_this, _, _, cx| {
-            drawer_entity.update(cx, |drawer, cx| {
-                drawer.open_tool(
-                    "grep_search",
-                    100,
-                    "{\n  \"query\": \"start_harness\",\n  \"path\": \"crates/\"\n}",
-                    "crates/dsh-core/src/lib.rs:84\n1 match found.",
-                    cx,
-                );
-            });
-        });
+        let tool_entries = self
+            .trace_entries
+            .iter()
+            .filter(|entry| entry.kind == "TOOL")
+            .cloned()
+            .collect::<Vec<_>>();
 
         div()
             .flex_1()
@@ -1187,7 +1193,17 @@ impl ChatView {
                             .gap_3()
                             .max_w_full()
                             .p_4()
-                            .child(
+                            .children(tool_entries.into_iter().map(|entry| {
+                                let drawer_entity = self.details_drawer.clone();
+                                let title = entry.title.clone();
+                                let args = entry.args.clone();
+                                let output = entry.output.clone();
+                                let duration = entry.duration_ms;
+                                let handle_tool_click = cx.listener(move |_this, _, _, cx| {
+                                    drawer_entity.update(cx, |drawer, cx| {
+                                        drawer.open_tool(&title, duration, &args, &output, cx);
+                                    });
+                                });
                                 div()
                                     .flex()
                                     .items_center()
@@ -1202,14 +1218,12 @@ impl ChatView {
                                     .cursor_pointer()
                                     .on_mouse_down(gpui::MouseButton::Left, handle_tool_click)
                                     .child(icons::agent_preset(14.0, rgb(0x61666b)))
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(rgb(0x61666b))
-                                            .child("grep_search (100ms)"),
-                                    )
-                                    .child(div().text_xs().text_color(rgb(0x16a34a)).child("✓")),
-                            )
+                                    .child(div().text_xs().text_color(rgb(0x61666b)).child(
+                                        format!("{} ({}ms)", entry.title, entry.duration_ms),
+                                    ))
+                                    .child(div().text_xs().text_color(rgb(0x16a34a)).child("✓"))
+                                    .into_any_element()
+                            }))
                             .children(
                                 StreamingMarkdownParser::parse_markdown(&self.streaming_text)
                                     .into_iter()
