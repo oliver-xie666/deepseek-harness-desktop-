@@ -615,7 +615,8 @@ impl Render for Sidebar {
                                         .text_color(rgb(0x81858c))
                                         .child("暂无会话")
                                         .into_any_element()
-                                }),
+                                })
+                                .child(file_tree_panel(self.file_tree.as_ref())),
                         )
                     }),
             )
@@ -674,6 +675,65 @@ fn menu_item(
         .text_xs()
         .text_color(rgb(0x3f454d))
         .child(label)
+}
+
+fn file_tree_panel(tree: Option<&FileNode>) -> impl IntoElement {
+    div()
+        .mt_2()
+        .pt_2()
+        .border_t_1()
+        .border_color(rgb(0xe5e7eb))
+        .flex()
+        .flex_col()
+        .gap_0p5()
+        .child(
+            div()
+                .px_1()
+                .text_xs()
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(rgb(0x61666b))
+                .child("Explorer"),
+        )
+        .child(if let Some(tree) = tree {
+            file_tree_node(tree, 0).into_any_element()
+        } else {
+            div()
+                .px_1()
+                .py_1()
+                .text_xs()
+                .text_color(rgb(0x81858c))
+                .child("无法读取工作区")
+                .into_any_element()
+        })
+}
+
+fn file_tree_node(node: &FileNode, depth: usize) -> impl IntoElement {
+    let child_rows = node
+        .children
+        .iter()
+        .map(|child| file_tree_node(child, depth + 1).into_any_element())
+        .collect::<Vec<_>>();
+    let indent = 8.0 + (depth as f32 * 12.0);
+    div()
+        .flex()
+        .flex_col()
+        .child(
+            div()
+                .h(px(24.0))
+                .pl(px(indent))
+                .flex()
+                .items_center()
+                .gap_1()
+                .text_xs()
+                .text_color(if node.is_dir {
+                    rgb(0x3f454d)
+                } else {
+                    rgb(0x61666b)
+                })
+                .child(node.icon.clone())
+                .child(node.name.clone()),
+        )
+        .children(child_rows)
 }
 
 fn workspace_menu(cx: &mut Context<Sidebar>) -> impl IntoElement {
