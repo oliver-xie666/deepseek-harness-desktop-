@@ -6,8 +6,9 @@ use gpui::{
     deferred, div, prelude::*, px, rgb, Context, Entity, FontWeight, IntoElement, MouseButton,
     Window,
 };
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 pub struct SessionItemView {
     pub id: String,
@@ -39,30 +40,20 @@ impl Sidebar {
         settings_modal: Entity<SettingsModal>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let tree = WorkspaceScanner::scan_dir(Path::new("."), 2).ok();
+        let initial_workspace = state.read(cx).workspace_path.blocking_read().clone();
+        let tree = WorkspaceScanner::scan_dir(&initial_workspace, 2).ok();
+        let initial_workspace_label = initial_workspace
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_else(|| initial_workspace.to_str().unwrap_or("工作区"))
+            .to_string();
         let search_input = cx.new(|cx| TextInput::new("搜索会话…", cx));
         let rename_input = cx.new(|cx| TextInput::new("输入会话名称", cx));
 
-        Self {
+        let view = Self {
             file_tree: tree,
-            sessions: vec![
-                SessionItemView {
-                    id: "new-session".into(),
-                    title: "新会话".into(),
-                    is_active: true,
-                },
-                SessionItemView {
-                    id: "workspace-root".into(),
-                    title: "读取工作区根目录图片".into(),
-                    is_active: false,
-                },
-                SessionItemView {
-                    id: "project-architecture".into(),
-                    title: "检索当前项目架构".into(),
-                    is_active: false,
-                },
-            ],
-            active_workspace: "deepseek-harness-desktop".into(),
+            sessions: Vec::new(),
+            active_workspace: initial_workspace_label,
             collapsed: false,
             search_open: false,
             view_options_open: false,
@@ -74,55 +65,79 @@ impl Sidebar {
             rename_input,
             state,
             settings_modal,
-        }
+        };
+
+        let app_state = view.state.read(cx).clone();
+        cx.spawn(async move |this, cx| {
+            let mut last_snapshot = String::new();
+            loop {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                let active_id = app_state.active_session_id.read().await.clone();
+                let workspace = app_state.workspace_path.read().await.clone();
+                let sessions = app_state.session_snapshot().await;
+                let snapshot = format!(
+                    "{}:{:?}:{}",
+                    workspace.display(),
+                    active_id,
+                    sessions
+                        .iter()
+                        .map(|session| format!(
+                            "{}:{}:{}",
+                            session.id, session.title, session.updated_at
+                        ))
+                        .collect::<Vec<_>>()
+                        .join("|")
+                );
+                if snapshot == last_snapshot {
+                    continue;
+                }
+                last_snapshot = snapshot;
+                let tree = WorkspaceScanner::scan_dir(&workspace, 2).ok();
+                let workspace_label = workspace
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_else(|| workspace.to_str().unwrap_or("工作区"))
+                    .to_string();
+                if this
+                    .update(cx, |sidebar, cx| {
+                        sidebar.file_tree = tree.clone();
+                        sidebar.active_workspace = workspace_label.clone();
+                        sidebar.sessions = sessions
+                            .iter()
+                            .map(|session| SessionItemView {
+                                id: session.id.clone(),
+                                title: session.title.clone(),
+                                is_active: active_id.as_deref() == Some(session.id.as_str()),
+                            })
+                            .collect();
+                        cx.notify();
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+
+        view
     }
 
     pub fn select_session(&mut self, id: &str, cx: &mut Context<Self>) {
-        for sess in &mut self.sessions {
-            sess.is_active = sess.id == id;
-        }
-        let title = self
-            .sessions
-            .iter()
-            .find(|session| session.id == id)
-            .map(|session| session.title.clone());
         let state = self.state.read(cx).clone();
-        if let Some(title) = title {
-            tokio::spawn(async move {
-                let existing_id = {
-                    let sessions = state.sessions.read().await;
-                    sessions
-                        .values()
-                        .find(|session| session.title == title)
-                        .map(|session| session.id.clone())
-                };
-                if let Some(session_id) = existing_id {
-                    *state.active_session_id.write().await = Some(session_id);
-                } else {
-                    state.create_session(&title, ".").await;
-                }
-            });
-        }
+        let id = id.to_string();
+        tokio::spawn(async move {
+            state.select_session(&id).await;
+        });
         self.session_menu = None;
         cx.notify();
     }
 
     pub fn add_new_session(&mut self, cx: &mut Context<Self>) {
-        for sess in &mut self.sessions {
-            sess.is_active = false;
-        }
-        let new_id = format!("session-{}", self.sessions.len() + 1);
         let state = self.state.read(cx).clone();
-        self.sessions.insert(
-            0,
-            SessionItemView {
-                id: new_id,
-                title: "新会话".into(),
-                is_active: true,
-            },
-        );
         tokio::spawn(async move {
-            state.create_session("新会话", ".").await;
+            let workspace = state.workspace_path.read().await.display().to_string();
+            state.create_session("新会话", &workspace).await;
         });
         self.session_menu = None;
         cx.notify();
@@ -164,9 +179,19 @@ impl Sidebar {
         cx.notify();
     }
 
-    fn set_workspace(&mut self, name: &str, cx: &mut Context<Self>) {
-        self.active_workspace = name.to_string();
+    fn set_workspace(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        let state = self.state.read(cx).clone();
+        let label = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_else(|| path.to_str().unwrap_or("工作区"))
+            .to_string();
+        self.file_tree = WorkspaceScanner::scan_dir(&path, 2).ok();
+        self.active_workspace = label;
         self.workspace_menu_open = false;
+        tokio::spawn(async move {
+            state.set_workspace_path(path).await;
+        });
         cx.notify();
     }
 
@@ -208,54 +233,31 @@ impl Sidebar {
             return;
         };
         let title = self.rename_input.read(cx).text().trim().to_string();
-        if !title.is_empty() {
-            if let Some(session) = self.sessions.iter_mut().find(|session| session.id == id) {
-                session.title = title;
-            }
-        }
+        let state = self.state.read(cx).clone();
+        tokio::spawn(async move {
+            let _ = state.rename_session(&id, &title).await;
+        });
         self.rename_input.update(cx, |input, cx| input.clear(cx));
         cx.notify();
     }
 
     fn duplicate_session(&mut self, id: &str, cx: &mut Context<Self>) {
-        let Some(title) = self
-            .sessions
-            .iter()
-            .find(|session| session.id == id)
-            .map(|session| format!("{} 副本", session.title))
-        else {
-            return;
-        };
         let state = self.state.read(cx).clone();
-        self.sessions.insert(
-            0,
-            SessionItemView {
-                id: format!("session-{}", self.sessions.len() + 1),
-                title: title.clone(),
-                is_active: false,
-            },
-        );
         self.session_menu = None;
+        let id = id.to_string();
         tokio::spawn(async move {
-            state.create_session(&title, ".").await;
+            let _ = state.duplicate_session(&id).await;
         });
         cx.notify();
     }
 
     fn delete_session(&mut self, id: &str, cx: &mut Context<Self>) {
-        let was_active = self
-            .sessions
-            .iter()
-            .find(|session| session.id == id)
-            .map(|session| session.is_active)
-            .unwrap_or(false);
-        self.sessions.retain(|session| session.id != id);
-        if was_active {
-            if let Some(first) = self.sessions.first_mut() {
-                first.is_active = true;
-            }
-        }
+        let state = self.state.read(cx).clone();
         self.session_menu = None;
+        let id = id.to_string();
+        tokio::spawn(async move {
+            let _ = state.delete_session(&id).await;
+        });
         cx.notify();
     }
 
@@ -675,7 +677,6 @@ fn menu_item(
 }
 
 fn workspace_menu(cx: &mut Context<Sidebar>) -> impl IntoElement {
-    let workspaces = ["deepseek-harness-desktop", "zed-fluid"];
     div()
         .absolute()
         .top(px(25.0))
@@ -689,13 +690,17 @@ fn workspace_menu(cx: &mut Context<Sidebar>) -> impl IntoElement {
         .shadow_lg()
         .flex()
         .flex_col()
-        .children(workspaces.into_iter().map(|workspace| {
-            let handle = cx.listener(move |this, _, _, cx| this.set_workspace(workspace, cx));
-            menu_item(workspace, handle).into_any_element()
-        }))
+        .child(menu_item(
+            ".",
+            cx.listener(|this, _, _, cx| this.set_workspace(PathBuf::from("."), cx)),
+        ))
+        .child(menu_item(
+            "..",
+            cx.listener(|this, _, _, cx| this.set_workspace(PathBuf::from(".."), cx)),
+        ))
         .child(div().h(px(1.0)).my_1().bg(rgb(0xe5e7eb)))
         .child(menu_item(
-            "添加工作区…",
-            cx.listener(|this, _, _, cx| this.set_workspace("新工作区", cx)),
+            "当前工作区",
+            cx.listener(|this, _, _, cx| this.set_workspace(PathBuf::from("."), cx)),
         ))
 }
