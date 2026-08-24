@@ -53,6 +53,7 @@ pub struct ChatView {
     pub trace_all_collapsed: bool,
     pub trace_collapsed_turns: HashSet<usize>,
     trace_entries: Vec<TraceEntry>,
+    session_log_lines: Vec<String>,
     trace_search_input: Entity<TextInput>,
 }
 
@@ -92,6 +93,7 @@ impl ChatView {
             trace_all_collapsed: false,
             trace_collapsed_turns: HashSet::new(),
             trace_entries: Vec::new(),
+            session_log_lines: Vec::new(),
             trace_search_input,
         };
 
@@ -278,6 +280,7 @@ impl ChatView {
                         .unwrap_or_default();
                     view.streaming_text = text;
                     view.trace_entries = trace_entries;
+                    view.session_log_lines = session.terminal_logs.clone();
                     cx.notify();
                 })?;
             }
@@ -746,12 +749,32 @@ impl ChatView {
                         .bg(rgb(0xf9fafb))
                         .border_b_1()
                         .border_color(rgb(0xe5e7eb))
+                        .flex()
+                        .flex_col()
+                        .gap_1()
                         .text_xs()
                         .text_color(rgb(0x61666b))
-                        .child(format!(
-                            "当前会话记录 · {} 条轨迹",
-                            self.trace_entries.len()
-                        )),
+                        .child(format!("Session log · {} 行", self.session_log_lines.len()))
+                        .children(if self.session_log_lines.is_empty() {
+                            vec![div()
+                                .text_xs()
+                                .text_color(rgb(0x81858c))
+                                .child("当前会话尚无终端日志")
+                                .into_any_element()]
+                        } else {
+                            self.session_log_lines
+                                .iter()
+                                .rev()
+                                .take(6)
+                                .map(|line| {
+                                    div()
+                                        .text_xs()
+                                        .text_color(rgb(0x3f454d))
+                                        .child(line.clone())
+                                        .into_any_element()
+                                })
+                                .collect()
+                        }),
                 )
             })
             .child(
