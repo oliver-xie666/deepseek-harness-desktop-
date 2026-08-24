@@ -2,6 +2,7 @@ use crate::icons;
 use dsh_common::AppPaths;
 use dsh_core::AppState;
 use gpui::{deferred, div, prelude::*, px, rgb, Context, FontWeight, IntoElement, Rgba, Window};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 // Shared palette matching the official light theme in 01.png and 02.png.
@@ -30,6 +31,7 @@ pub struct WorkspaceSelector {
     pub is_open: bool,
     pub current_workspace: String,
     pub has_selection: bool,
+    state: Option<Arc<AppState>>,
 }
 
 impl WorkspaceSelector {
@@ -38,6 +40,14 @@ impl WorkspaceSelector {
             is_open: false,
             current_workspace: "deepseek-harness-desktop".into(),
             has_selection: true,
+            state: None,
+        }
+    }
+
+    pub fn with_state(state: Arc<AppState>) -> Self {
+        Self {
+            state: Some(state),
+            ..Self::new()
         }
     }
 
@@ -50,7 +60,25 @@ impl WorkspaceSelector {
         self.current_workspace = label.to_string();
         self.has_selection = true;
         self.is_open = false;
+        if let Some(state) = self.state.clone() {
+            let path = match label {
+                "deepseek-harness-desktop" => PathBuf::from("."),
+                "上级目录" => PathBuf::from(".."),
+                _ => PathBuf::from(label),
+            };
+            tokio::spawn(async move {
+                state.set_workspace_path(path).await;
+            });
+        }
         cx.notify();
+    }
+
+    pub fn sync_workspace(&mut self, label: &str, cx: &mut Context<Self>) {
+        if self.current_workspace != label {
+            self.current_workspace = label.to_string();
+            self.has_selection = true;
+            cx.notify();
+        }
     }
 }
 
@@ -63,12 +91,15 @@ impl Render for WorkspaceSelector {
         let handle_toggle = cx.listener(|this, _, _, cx| {
             this.toggle(cx);
         });
+        let handle_add_workspace = cx.listener(|this, _, _, cx| {
+            this.set_workspace("deepseek-harness-desktop", cx);
+        });
 
         // Workspace rows render folder icon + title (official picker: no
         // description, "add workspace…" pinned in a footer below a divider).
         let workspaces: Vec<(&str, &str)> = vec![
             ("deepseek-harness-desktop", "deepseek-harness-desktop"),
-            ("zed-fluid", "zed-fluid"),
+            ("上级目录", "上级目录"),
         ];
 
         div()
@@ -147,6 +178,7 @@ impl Render for WorkspaceSelector {
                                 .rounded(px(10.0))
                                 .hover(|s| s.bg(bg_menu_item_hover()))
                                 .cursor_pointer()
+                                .on_mouse_down(gpui::MouseButton::Left, handle_add_workspace)
                                 .child(icons::plus(16.0, text_muted()))
                                 .child(
                                     div()
