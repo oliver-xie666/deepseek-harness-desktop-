@@ -4,7 +4,7 @@ use crate::text_input::TextInput;
 use dsh_core::{AppState, FileNode, WorkspaceScanner};
 use gpui::{
     deferred, div, prelude::*, px, rgb, Context, Entity, FontWeight, IntoElement, MouseButton,
-    Window,
+    Subscription, Window,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -32,6 +32,7 @@ pub struct Sidebar {
     rename_input: Entity<TextInput>,
     state: Entity<Arc<AppState>>,
     settings_modal: Entity<SettingsModal>,
+    _search_subscription: Subscription,
 }
 
 impl Sidebar {
@@ -61,10 +62,11 @@ impl Sidebar {
             sort_by_name: false,
             session_menu: None,
             renaming_session: None,
-            search_input,
+            search_input: search_input.clone(),
             rename_input,
             state,
             settings_modal,
+            _search_subscription: cx.observe(&search_input, |_, _, cx| cx.notify()),
         };
 
         let app_state = view.state.read(cx).clone();

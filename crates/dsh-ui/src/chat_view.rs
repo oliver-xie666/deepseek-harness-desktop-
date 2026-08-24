@@ -7,7 +7,9 @@ use dsh_core::AppState;
 use dsh_markdown::{
     CodeHighlighter, InlineSpan, MarkdownBlock, StreamingMarkdownParser, TokenType,
 };
-use gpui::{div, prelude::*, px, rgb, rgba, Context, Entity, FontWeight, IntoElement, Window};
+use gpui::{
+    div, prelude::*, px, rgb, rgba, Context, Entity, FontWeight, IntoElement, Subscription, Window,
+};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
@@ -55,6 +57,7 @@ pub struct ChatView {
     trace_entries: Vec<TraceEntry>,
     session_log_lines: Vec<String>,
     trace_search_input: Entity<TextInput>,
+    _trace_search_subscription: Subscription,
 }
 
 impl ChatView {
@@ -95,7 +98,8 @@ impl ChatView {
             trace_collapsed_turns: HashSet::new(),
             trace_entries: Vec::new(),
             session_log_lines: Vec::new(),
-            trace_search_input,
+            trace_search_input: trace_search_input.clone(),
+            _trace_search_subscription: cx.observe(&trace_search_input, |_, _, cx| cx.notify()),
         };
 
         // AppState is shared with the Tokio WebSocket task, so bridge its
