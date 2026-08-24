@@ -65,7 +65,8 @@ impl ChatView {
         let text_input = cx.new(|cx| TextInput::new("输入消息…", cx));
         let trace_search_input = cx.new(|cx| TextInput::new("搜索轨迹…", cx));
         let workspace_selector = cx.new(|_| WorkspaceSelector::new());
-        let preset_selector = cx.new(|_| AgentPresetSelector::new());
+        let preset_state = state.read(cx).clone();
+        let preset_selector = cx.new(|_| AgentPresetSelector::with_state(preset_state));
 
         let view = Self {
             state,
