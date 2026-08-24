@@ -52,6 +52,7 @@ pub struct ChatView {
     pub permission_mode: String,
     pub model_name: String,
     plus_menu_open: bool,
+    conversation_messages: Vec<dsh_core::ChatMessage>,
     active_view: SessionView,
     pub session_log_open: bool,
     pub trace_actual_duration: bool,
@@ -95,6 +96,7 @@ impl ChatView {
             permission_mode: "Full access".into(),
             model_name: "gpt-5.6-luna".into(),
             plus_menu_open: false,
+            conversation_messages: Vec::new(),
             active_view: SessionView::Chat,
             session_log_open: false,
             trace_actual_duration: false,
@@ -303,6 +305,7 @@ impl ChatView {
                     view.streaming_text = text;
                     view.trace_entries = trace_entries;
                     view.session_log_lines = session.terminal_logs.clone();
+                    view.conversation_messages = session.messages.clone();
                     cx.notify();
                 })?;
             }
@@ -1257,12 +1260,89 @@ impl ChatView {
             &self.active_prompt
         };
 
-        let tool_entries = self
-            .trace_entries
-            .iter()
-            .filter(|entry| entry.kind == "TOOL")
-            .cloned()
-            .collect::<Vec<_>>();
+        let message_rows =
+            if self.conversation_messages.is_empty() {
+                vec![div()
+                    .text_sm()
+                    .text_color(rgb(0x81858c))
+                    .child(user_prompt.to_string())
+                    .into_any_element()]
+            } else {
+                self.conversation_messages
+                    .iter()
+                    .map(|message| match message.sender {
+                        dsh_core::MessageSender::User => div()
+                            .flex()
+                            .justify_end()
+                            .child(
+                                div()
+                                    .max_w_3_4()
+                                    .px_4()
+                                    .py_2p5()
+                                    .rounded_2xl()
+                                    .bg(rgb(0xe8f0ff))
+                                    .text_sm()
+                                    .text_color(rgb(0x0f1115))
+                                    .child(message.content.clone()),
+                            )
+                            .into_any_element(),
+                        dsh_core::MessageSender::Assistant => div()
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .max_w_full()
+                            .p_4()
+                            .children(message.tool_calls.iter().map(|tool| {
+                                let drawer_entity = self.details_drawer.clone();
+                                let title = tool.tool_name.clone();
+                                let args = tool.input.to_string();
+                                let output = tool
+                                    .output
+                                    .as_ref()
+                                    .map(ToString::to_string)
+                                    .unwrap_or_else(|| "等待工具返回".into());
+                                let duration = tool.duration_ms;
+                                let handle_tool_click = cx.listener(move |_this, _, _, cx| {
+                                    drawer_entity.update(cx, |drawer, cx| {
+                                        drawer.open_tool(&title, duration, &args, &output, cx);
+                                    });
+                                });
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .px_3()
+                                    .py_1p5()
+                                    .rounded_md()
+                                    .bg(rgb(0xf5f6f8))
+                                    .border_1()
+                                    .border_color(rgb(0xe1e5eb))
+                                    .hover(|s| s.bg(rgb(0xf1f3f5)).border_color(rgb(0x3964fe)))
+                                    .cursor_pointer()
+                                    .on_mouse_down(gpui::MouseButton::Left, handle_tool_click)
+                                    .child(icons::agent_preset(14.0, rgb(0x61666b)))
+                                    .child(div().text_xs().text_color(rgb(0x61666b)).child(
+                                        format!("{} ({}ms)", tool.tool_name, tool.duration_ms),
+                                    ))
+                                    .into_any_element()
+                            }))
+                            .children(
+                                StreamingMarkdownParser::parse_markdown(&message.content)
+                                    .into_iter()
+                                    .map(|block| self.render_markdown_block(block)),
+                            )
+                            .into_any_element(),
+                        dsh_core::MessageSender::System => div()
+                            .p_3()
+                            .rounded_md()
+                            .bg(rgb(0xf5f6f8))
+                            .text_xs()
+                            .text_color(rgb(0x61666b))
+                            .child(message.content.clone())
+                            .into_any_element(),
+                    })
+                    .collect()
+            };
 
         div()
             .flex_1()
@@ -1298,42 +1378,7 @@ impl ChatView {
                             .gap_3()
                             .max_w_full()
                             .p_4()
-                            .children(tool_entries.into_iter().map(|entry| {
-                                let drawer_entity = self.details_drawer.clone();
-                                let title = entry.title.clone();
-                                let args = entry.args.clone();
-                                let output = entry.output.clone();
-                                let duration = entry.duration_ms;
-                                let handle_tool_click = cx.listener(move |_this, _, _, cx| {
-                                    drawer_entity.update(cx, |drawer, cx| {
-                                        drawer.open_tool(&title, duration, &args, &output, cx);
-                                    });
-                                });
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .px_3()
-                                    .py_1p5()
-                                    .rounded_md()
-                                    .bg(rgb(0xf5f6f8))
-                                    .border_1()
-                                    .border_color(rgb(0xe1e5eb))
-                                    .hover(|s| s.bg(rgb(0xf1f3f5)).border_color(rgb(0x3964fe)))
-                                    .cursor_pointer()
-                                    .on_mouse_down(gpui::MouseButton::Left, handle_tool_click)
-                                    .child(icons::agent_preset(14.0, rgb(0x61666b)))
-                                    .child(div().text_xs().text_color(rgb(0x61666b)).child(
-                                        format!("{} ({}ms)", entry.title, entry.duration_ms),
-                                    ))
-                                    .child(div().text_xs().text_color(rgb(0x16a34a)).child("✓"))
-                                    .into_any_element()
-                            }))
-                            .children(
-                                StreamingMarkdownParser::parse_markdown(&self.streaming_text)
-                                    .into_iter()
-                                    .map(|b| self.render_markdown_block(b)),
-                            ),
+                            .children(message_rows),
                     ),
             )
     }
