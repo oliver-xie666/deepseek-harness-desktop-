@@ -1,6 +1,7 @@
 use crate::details_drawer::DetailsDrawer;
 use crate::dropdown::{AgentPresetSelector, WorkspaceSelector};
 use crate::icons;
+use crate::model_catalog::model_options;
 use crate::text_input::TextInput;
 use dsh_common::AppPaths;
 use dsh_core::AppState;
@@ -916,7 +917,7 @@ impl ChatView {
         let current = self.model_name.clone();
         let is_open = self.model_open;
         let handle_toggle = cx.listener(|this, _, _, cx| this.toggle_model(cx));
-        let handle_luna = cx.listener(|this, _, _, cx| this.set_model("gpt-5.6-luna", cx));
+        let models = model_options(&current);
 
         div()
             .relative()
@@ -954,12 +955,14 @@ impl ChatView {
                         .shadow_lg()
                         .flex()
                         .flex_col()
-                        .children([menu_choice(
-                            "gpt-5.6-luna",
-                            current == "gpt-5.6-luna",
-                            handle_luna,
-                        )
-                        .into_any_element()]),
+                        .children(models.into_iter().map(|model| {
+                            let selected = current == model;
+                            let model_for_handler = model.clone();
+                            let handle = cx.listener(move |this, _, _, cx| {
+                                this.set_model(&model_for_handler, cx);
+                            });
+                            menu_choice(&model, selected, handle).into_any_element()
+                        })),
                 )
             })
     }
