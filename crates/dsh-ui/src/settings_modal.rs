@@ -1,4 +1,5 @@
 use crate::icons;
+use crate::model_catalog::model_options;
 use dsh_common::AppPaths;
 use dsh_core::{AppConfig, AppState, McpServerConfig, McpTransport};
 use gpui::{
@@ -277,7 +278,7 @@ impl SettingsModal {
         let model_name = self.config.model.model_name.clone();
         let api_ready = !self.config.model.api_key.trim().is_empty();
         let handle_edit = cx.listener(|this, _, _, cx| this.toggle_model_editor(cx));
-        let handle_luna = cx.listener(|this, _, _, cx| this.set_model_name("gpt-5.6-luna", cx));
+        let models = model_options(&model_name);
 
         div()
             .flex()
@@ -366,14 +367,16 @@ impl SettingsModal {
                                         .text_color(rgb(0x61666b))
                                         .child("可用模型"),
                                 )
-                                .child(
-                                    div().flex().gap_1().children([choice_button(
-                                        "gpt-5.6-luna",
-                                        model_name == "gpt-5.6-luna",
-                                        handle_luna,
-                                    )
-                                    .into_any_element()]),
-                                ),
+                                .child(div().flex().gap_1().children(models.into_iter().map(
+                                    |model| {
+                                        let selected = model_name == model;
+                                        let model_for_handler = model.clone();
+                                        let handle = cx.listener(move |this, _, _, cx| {
+                                            this.set_model_name(&model_for_handler, cx);
+                                        });
+                                        choice_button(&model, selected, handle).into_any_element()
+                                    },
+                                ))),
                         )
                     }),
             )
