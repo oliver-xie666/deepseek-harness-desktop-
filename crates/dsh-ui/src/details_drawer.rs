@@ -56,6 +56,14 @@ impl Render for DetailsDrawer {
         let handle_close = cx.listener(|this, _, _, cx| {
             this.close(cx);
         });
+        let args_to_copy = self.args_json.clone();
+        let handle_copy_args = cx.listener(move |_this, _, _, cx| {
+            cx.write_to_clipboard(args_to_copy.clone().into());
+        });
+        let output_to_copy = self.output_raw.clone();
+        let handle_copy_output = cx.listener(move |_this, _, _, cx| {
+            cx.write_to_clipboard(output_to_copy.clone().into());
+        });
 
         div()
             .w_80()
@@ -122,10 +130,17 @@ impl Render for DetailsDrawer {
                             .gap_1()
                             .child(
                                 div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(rgb(0x61666b))
-                                    .child("PARAMETERS"),
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(rgb(0x61666b))
+                                            .child("PARAMETERS"),
+                                    )
+                                    .child(copy_button(handle_copy_args)),
                             )
                             .child(
                                 div()
@@ -147,10 +162,17 @@ impl Render for DetailsDrawer {
                             .gap_1()
                             .child(
                                 div()
-                                    .text_xs()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(rgb(0x61666b))
-                                    .child("OUTPUT"),
+                                    .flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(rgb(0x61666b))
+                                            .child("OUTPUT"),
+                                    )
+                                    .child(copy_button(handle_copy_output)),
                             )
                             .child(
                                 div()
@@ -167,4 +189,19 @@ impl Render for DetailsDrawer {
                     ),
             )
     }
+}
+
+fn copy_button(
+    handler: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+) -> impl IntoElement {
+    div()
+        .px_2()
+        .py_1()
+        .rounded_md()
+        .text_xs()
+        .text_color(rgb(0x61666b))
+        .hover(|style| style.bg(rgb(0xf1f3f5)).text_color(rgb(0x0f1115)))
+        .cursor_pointer()
+        .on_mouse_down(gpui::MouseButton::Left, handler)
+        .child("复制")
 }
