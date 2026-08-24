@@ -9,7 +9,8 @@ use dsh_markdown::{
     CodeHighlighter, InlineSpan, MarkdownBlock, StreamingMarkdownParser, TokenType,
 };
 use gpui::{
-    div, prelude::*, px, rgb, rgba, Context, Entity, FontWeight, IntoElement, Subscription, Window,
+    deferred, div, prelude::*, px, rgb, rgba, Context, Entity, FontWeight, IntoElement,
+    Subscription, Window,
 };
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -50,6 +51,7 @@ pub struct ChatView {
     pub model_open: bool,
     pub permission_mode: String,
     pub model_name: String,
+    plus_menu_open: bool,
     active_view: SessionView,
     pub session_log_open: bool,
     pub trace_actual_duration: bool,
@@ -92,6 +94,7 @@ impl ChatView {
             model_open: false,
             permission_mode: "Full access".into(),
             model_name: "gpt-5.6-luna".into(),
+            plus_menu_open: false,
             active_view: SessionView::Chat,
             session_log_open: false,
             trace_actual_duration: false,
@@ -364,6 +367,21 @@ impl ChatView {
     fn toggle_model(&mut self, cx: &mut Context<Self>) {
         self.model_open = !self.model_open;
         self.permission_open = false;
+        cx.notify();
+    }
+
+    fn toggle_plus_menu(&mut self, cx: &mut Context<Self>) {
+        self.plus_menu_open = !self.plus_menu_open;
+        self.permission_open = false;
+        self.model_open = false;
+        cx.notify();
+    }
+
+    fn insert_command(&mut self, command: &str, cx: &mut Context<Self>) {
+        self.text_input.update(cx, |input, cx| {
+            input.set_text(command, cx);
+        });
+        self.plus_menu_open = false;
         cx.notify();
     }
 
@@ -651,23 +669,7 @@ impl ChatView {
                                             .flex()
                                             .items_center()
                                             .gap_2()
-                                            .child(
-                                                div()
-                                                    .size(px(28.0))
-                                                    .rounded_full()
-                                                    .bg(rgb(0xf1f3f5))
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_center()
-                                                    .text_sm()
-                                                    .text_color(rgb(0x61666b))
-                                                    .hover(|s| {
-                                                        s.bg(rgb(0xe9edf2))
-                                                            .text_color(rgb(0x0f1115))
-                                                    })
-                                                    .cursor_pointer()
-                                                    .child(icons::plus(14.0, rgb(0x61666b))),
-                                            )
+                                            .child(self.render_plus_button(cx))
                                             .child(self.render_access_selector(cx)),
                                     )
                                     .child(
@@ -910,6 +912,50 @@ impl ChatView {
                             .into_any_element(),
                         ]),
                 )
+            })
+    }
+
+    fn render_plus_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let handle_help = cx.listener(|this, _, _, cx| this.insert_command("/help", cx));
+        let handle_model = cx.listener(|this, _, _, cx| this.insert_command("/model", cx));
+        let handle_clear = cx.listener(|this, _, _, cx| this.insert_command("/clear", cx));
+        div()
+            .absolute()
+            .bottom(px(36.0))
+            .left(px(0.0))
+            .w(px(180.0))
+            .p_1()
+            .rounded_lg()
+            .bg(rgb(0xffffff))
+            .border_1()
+            .border_color(rgb(0xe1e5eb))
+            .shadow_lg()
+            .flex()
+            .flex_col()
+            .child(menu_choice("/help", false, handle_help))
+            .child(menu_choice("/model", false, handle_model))
+            .child(menu_choice("/clear", false, handle_clear))
+    }
+
+    fn render_plus_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let handle_plus = cx.listener(|this, _, _, cx| this.toggle_plus_menu(cx));
+        div()
+            .relative()
+            .child(
+                div()
+                    .size(px(28.0))
+                    .rounded_full()
+                    .bg(rgb(0xf1f3f5))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .hover(|s| s.bg(rgb(0xe9edf2)))
+                    .cursor_pointer()
+                    .on_mouse_down(gpui::MouseButton::Left, handle_plus)
+                    .child(icons::plus(14.0, rgb(0x61666b))),
+            )
+            .when(self.plus_menu_open, |this| {
+                this.child(deferred(self.render_plus_menu(cx)))
             })
     }
 
@@ -1344,18 +1390,7 @@ impl Render for ChatView {
                                                 .flex()
                                                 .items_center()
                                                 .gap_2()
-                                                .child(
-                                                    div()
-                                                        .size(px(28.0))
-                                                        .rounded_full()
-                                                        .bg(rgb(0xf1f3f5))
-                                                        .flex()
-                                                        .items_center()
-                                                        .justify_center()
-                                                        .hover(|s| s.bg(rgb(0xe9edf2)))
-                                                        .cursor_pointer()
-                                                        .child(icons::plus(14.0, rgb(0x61666b))),
-                                                )
+                                                .child(self.render_plus_button(cx))
                                                 .child(self.render_access_selector(cx)),
                                         )
                                         .child(
