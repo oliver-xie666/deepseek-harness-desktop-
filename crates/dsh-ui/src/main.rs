@@ -33,12 +33,27 @@ struct CliArgs {
     port: Option<u16>,
 
     /// Run with embedded mock daemon
-    #[arg(long, default_value_t = true)]
+    #[arg(long)]
     mock: bool,
 
     /// Default model name
     #[arg(short, long)]
     model: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mock_daemon_requires_explicit_flag() {
+        assert!(!CliArgs::try_parse_from(["dsh-desktop"]).unwrap().mock);
+        assert!(
+            CliArgs::try_parse_from(["dsh-desktop", "--mock"])
+                .unwrap()
+                .mock
+        );
+    }
 }
 
 fn main() {
