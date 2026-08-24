@@ -1,8 +1,5 @@
 use crate::icons;
-use dsh_common::AppPaths;
-use dsh_core::AppState;
 use gpui::{deferred, div, prelude::*, px, rgb, Context, FontWeight, IntoElement, Rgba, Window};
-use std::sync::Arc;
 
 // Shared palette matching the official light theme in 01.png and 02.png.
 fn bg_menu() -> Rgba {
@@ -166,7 +163,6 @@ impl Render for WorkspaceSelector {
 pub struct AgentPresetSelector {
     pub is_open: bool,
     pub current: String,
-    state: Option<Arc<AppState>>,
 }
 
 impl AgentPresetSelector {
@@ -174,14 +170,6 @@ impl AgentPresetSelector {
         Self {
             is_open: false,
             current: "标准模式".into(),
-            state: None,
-        }
-    }
-
-    pub fn with_state(state: Arc<AppState>) -> Self {
-        Self {
-            state: Some(state),
-            ..Self::new()
         }
     }
 
@@ -193,20 +181,6 @@ impl AgentPresetSelector {
     pub fn set_preset(&mut self, name: &str, cx: &mut Context<Self>) {
         self.current = name.to_string();
         self.is_open = false;
-        if let Some(state) = self.state.clone() {
-            let value = match name {
-                "PTC 模式" => "code",
-                "极简模式" => "minimal",
-                "创造模式" => "cordis",
-                _ => "standard",
-            }
-            .to_string();
-            tokio::spawn(async move {
-                let mut config = state.config.write().await;
-                config.ui.agent_preset = value;
-                let _ = config.save(&AppPaths::data_dir());
-            });
-        }
         cx.notify();
     }
 }
