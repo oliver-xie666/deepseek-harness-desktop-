@@ -26,3 +26,6 @@ resources/runtime/extracted/
 
 # Local desktop topic metadata
 .reasonix/
+
+# Local visual brainstorming workspace
+.superpowers/
