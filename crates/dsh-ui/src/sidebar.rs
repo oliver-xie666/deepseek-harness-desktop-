@@ -616,7 +616,7 @@ impl Render for Sidebar {
                                         .child("暂无会话")
                                         .into_any_element()
                                 })
-                                .child(file_tree_panel(self.file_tree.as_ref())),
+                                .child(file_tree_panel(self.file_tree.as_ref(), cx)),
                         )
                     }),
             )
@@ -677,7 +677,7 @@ fn menu_item(
         .child(label)
 }
 
-fn file_tree_panel(tree: Option<&FileNode>) -> impl IntoElement {
+fn file_tree_panel(tree: Option<&FileNode>, cx: &mut Context<Sidebar>) -> impl IntoElement {
     div()
         .mt_2()
         .pt_2()
@@ -695,7 +695,7 @@ fn file_tree_panel(tree: Option<&FileNode>) -> impl IntoElement {
                 .child("Explorer"),
         )
         .child(if let Some(tree) = tree {
-            file_tree_node(tree, 0).into_any_element()
+            file_tree_node(tree, 0, cx).into_any_element()
         } else {
             div()
                 .px_1()
@@ -707,11 +707,15 @@ fn file_tree_panel(tree: Option<&FileNode>) -> impl IntoElement {
         })
 }
 
-fn file_tree_node(node: &FileNode, depth: usize) -> impl IntoElement {
+fn file_tree_node(node: &FileNode, depth: usize, cx: &mut Context<Sidebar>) -> impl IntoElement {
+    let path = node.path.clone();
+    let handle_open = cx.listener(move |_this, _, _, cx| {
+        cx.open_with_system(&path);
+    });
     let child_rows = node
         .children
         .iter()
-        .map(|child| file_tree_node(child, depth + 1).into_any_element())
+        .map(|child| file_tree_node(child, depth + 1, cx).into_any_element())
         .collect::<Vec<_>>();
     let indent = 8.0 + (depth as f32 * 12.0);
     div()
@@ -724,6 +728,9 @@ fn file_tree_node(node: &FileNode, depth: usize) -> impl IntoElement {
                 .flex()
                 .items_center()
                 .gap_1()
+                .hover(|style| style.bg(rgb(0xf1f3f5)))
+                .cursor_pointer()
+                .on_mouse_down(MouseButton::Left, handle_open)
                 .text_xs()
                 .text_color(if node.is_dir {
                     rgb(0x3f454d)
