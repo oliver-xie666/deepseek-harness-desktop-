@@ -65,8 +65,9 @@ impl ChatView {
     ) -> Self {
         let text_input = cx.new(|cx| TextInput::new("输入消息…", cx));
         let trace_search_input = cx.new(|cx| TextInput::new("搜索轨迹…", cx));
-        let workspace_selector = cx.new(|_| WorkspaceSelector::new());
         let preset_state = state.read(cx).clone();
+        let workspace_state = state.read(cx).clone();
+        let workspace_selector = cx.new(|_| WorkspaceSelector::with_state(workspace_state));
         let preset_selector = cx.new(|_| AgentPresetSelector::with_state(preset_state));
 
         let view = Self {
@@ -106,6 +107,14 @@ impl ChatView {
                 tokio::time::sleep(Duration::from_millis(50)).await;
 
                 let config = state.config.read().await.clone();
+                let workspace_label = state
+                    .workspace_path
+                    .read()
+                    .await
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("工作区")
+                    .to_string();
                 let permission_mode = match config.ui.permission_mode.as_str() {
                     "read-only" => "Read Only",
                     "workspace-write" => "Workspace Write",
@@ -128,6 +137,11 @@ impl ChatView {
                 if should_submit {
                     this.update(cx, |view, cx| view.submit_current_input(cx))?;
                 }
+                this.update(cx, |view, cx| {
+                    view.workspace_selector.update(cx, |selector, cx| {
+                        selector.sync_workspace(&workspace_label, cx)
+                    });
+                })?;
 
                 let snapshot = {
                     let active_id = state.active_session_id.read().await.clone();
