@@ -62,10 +62,18 @@ pub struct Session {
     pub id: String,
     pub title: String,
     pub workspace_path: String,
+    #[serde(default = "default_session_time")]
+    pub created_at: DateTime<Utc>,
+    #[serde(default = "default_session_time")]
+    pub updated_at: DateTime<Utc>,
     pub messages: Vec<ChatMessage>,
     pub diffs: HashMap<String, FileDiffItem>,
     pub terminal_logs: Vec<String>,
     pub agent_state: Option<AgentState>,
+}
+
+fn default_session_time() -> DateTime<Utc> {
+    Utc::now()
 }
 
 pub struct AppState {
@@ -111,10 +119,13 @@ impl AppState {
 
     pub async fn create_session(&self, title: &str, workspace: &str) -> String {
         let session_id = Uuid::new_v4().to_string();
+        let now = Utc::now();
         let session = Session {
             id: session_id.clone(),
             title: title.to_string(),
             workspace_path: workspace.to_string(),
+            created_at: now,
+            updated_at: now,
             messages: Vec::new(),
             diffs: HashMap::new(),
             terminal_logs: Vec::new(),
@@ -133,6 +144,90 @@ impl AppState {
         session_id
     }
 
+    pub async fn session_snapshot(&self) -> Vec<Session> {
+        let mut sessions = self
+            .sessions
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        sessions
+    }
+
+    pub async fn select_session(&self, session_id: &str) -> bool {
+        if self.sessions.read().await.contains_key(session_id) {
+            *self.active_session_id.write().await = Some(session_id.to_string());
+            true
+        } else {
+            false
+        }
+    }
+
+    pub async fn rename_session(&self, session_id: &str, title: &str) -> Result<bool> {
+        let title = title.trim();
+        if title.is_empty() {
+            return Ok(false);
+        }
+
+        let Some(mut updated) = self.sessions.read().await.get(session_id).cloned() else {
+            return Ok(false);
+        };
+        updated.title = title.to_string();
+        updated.updated_at = Utc::now();
+        SessionPersistence::save_session(&AppPaths::data_dir(), &updated)?;
+        self.sessions
+            .write()
+            .await
+            .insert(session_id.to_string(), updated);
+        Ok(true)
+    }
+
+    pub async fn duplicate_session(&self, session_id: &str) -> Result<Option<String>> {
+        let Some(mut duplicate) = self.sessions.read().await.get(session_id).cloned() else {
+            return Ok(None);
+        };
+
+        let now = Utc::now();
+        duplicate.id = Uuid::new_v4().to_string();
+        duplicate.title = format!("{} 副本", duplicate.title);
+        duplicate.created_at = now;
+        duplicate.updated_at = now;
+        let duplicate_id = duplicate.id.clone();
+        SessionPersistence::save_session(&AppPaths::data_dir(), &duplicate)?;
+        self.sessions
+            .write()
+            .await
+            .insert(duplicate_id.clone(), duplicate);
+        *self.active_session_id.write().await = Some(duplicate_id.clone());
+        Ok(Some(duplicate_id))
+    }
+
+    pub async fn delete_session(&self, session_id: &str) -> Result<bool> {
+        if !self.sessions.read().await.contains_key(session_id) {
+            return Ok(false);
+        }
+
+        SessionPersistence::delete_session(&AppPaths::data_dir(), session_id)?;
+        let mut sessions = self.sessions.write().await;
+        sessions.remove(session_id);
+        let next_active = sessions
+            .values()
+            .max_by_key(|session| session.updated_at)
+            .map(|session| session.id.clone());
+        drop(sessions);
+
+        if self.active_session_id.read().await.as_deref() == Some(session_id) {
+            *self.active_session_id.write().await = next_active;
+        }
+        Ok(true)
+    }
+
+    pub async fn set_workspace_path(&self, workspace_path: PathBuf) {
+        *self.workspace_path.write().await = workspace_path;
+    }
+
     pub async fn add_user_message(&self, session_id: &str, text: &str) -> Result<()> {
         let msg = ChatMessage {
             id: Uuid::new_v4().to_string(),
@@ -144,6 +239,7 @@ impl AppState {
 
         if let Some(session) = self.sessions.write().await.get_mut(session_id) {
             session.messages.push(msg);
+            session.updated_at = Utc::now();
             let _ = SessionPersistence::save_session(&AppPaths::data_dir(), session);
         }
 
@@ -195,11 +291,16 @@ impl AppState {
             for s in saved {
                 sessions.insert(s.id.clone(), s);
             }
+            let active = sessions
+                .values()
+                .max_by_key(|session| session.updated_at)
+                .map(|session| session.id.clone());
+            *self.active_session_id.write().await = active;
         }
     }
 
     pub async fn handle_server_event(&self, event: HarnessServerEvent) {
-        match event {
+        let session_to_save = match event {
             HarnessServerEvent::TokenChunk {
                 session_id,
                 message_id,
@@ -210,16 +311,32 @@ impl AppState {
                         if last_msg.sender == MessageSender::Assistant && last_msg.id == message_id
                         {
                             last_msg.content.push_str(&text);
-                            return;
+                            session.updated_at = Utc::now();
+                            Some(session.clone())
+                        } else {
+                            session.messages.push(ChatMessage {
+                                id: message_id,
+                                sender: MessageSender::Assistant,
+                                content: text,
+                                tool_calls: Vec::new(),
+                                created_at: Utc::now(),
+                            });
+                            session.updated_at = Utc::now();
+                            Some(session.clone())
                         }
+                    } else {
+                        session.messages.push(ChatMessage {
+                            id: message_id,
+                            sender: MessageSender::Assistant,
+                            content: text,
+                            tool_calls: Vec::new(),
+                            created_at: Utc::now(),
+                        });
+                        session.updated_at = Utc::now();
+                        Some(session.clone())
                     }
-                    session.messages.push(ChatMessage {
-                        id: message_id,
-                        sender: MessageSender::Assistant,
-                        content: text,
-                        tool_calls: Vec::new(),
-                        created_at: Utc::now(),
-                    });
+                } else {
+                    None
                 }
             }
             HarnessServerEvent::ToolCallStart {
@@ -239,6 +356,10 @@ impl AppState {
                             duration_ms: 0,
                         });
                     }
+                    session.updated_at = Utc::now();
+                    Some(session.clone())
+                } else {
+                    None
                 }
             }
             HarnessServerEvent::ToolCallEnd {
@@ -257,6 +378,10 @@ impl AppState {
                             break;
                         }
                     }
+                    session.updated_at = Utc::now();
+                    Some(session.clone())
+                } else {
+                    None
                 }
             }
             HarnessServerEvent::FileDiffReady {
@@ -275,11 +400,19 @@ impl AppState {
                             accepted: None,
                         },
                     );
+                    session.updated_at = Utc::now();
+                    Some(session.clone())
+                } else {
+                    None
                 }
             }
             HarnessServerEvent::AgentStateChange { session_id, state } => {
                 if let Some(session) = self.sessions.write().await.get_mut(&session_id) {
                     session.agent_state = Some(state);
+                    session.updated_at = Utc::now();
+                    Some(session.clone())
+                } else {
+                    None
                 }
             }
             HarnessServerEvent::TerminalLog {
@@ -287,9 +420,17 @@ impl AppState {
             } => {
                 if let Some(session) = self.sessions.write().await.get_mut(&session_id) {
                     session.terminal_logs.push(line);
+                    session.updated_at = Utc::now();
+                    Some(session.clone())
+                } else {
+                    None
                 }
             }
-            _ => {}
+            _ => None,
+        };
+
+        if let Some(session) = session_to_save {
+            let _ = SessionPersistence::save_session(&AppPaths::data_dir(), &session);
         }
     }
 }
@@ -319,5 +460,18 @@ mod tests {
         let session = sessions.get(&session_id).unwrap();
         assert_eq!(session.messages.len(), 1);
         assert_eq!(session.messages[0].content, "Hello");
+    }
+
+    #[tokio::test]
+    async fn session_lifecycle_uses_ids_and_updates_active_session() {
+        let (state, _) = AppState::new(DaemonConfig::default());
+        let first = state.create_session("相同标题", "/tmp/a").await;
+        let second = state.create_session("相同标题", "/tmp/b").await;
+
+        assert!(state.rename_session(&first, "已重命名").await.unwrap());
+        let copy = state.duplicate_session(&first).await.unwrap().unwrap();
+        assert_ne!(copy, first);
+        assert!(state.delete_session(&second).await.unwrap());
+        assert_eq!(*state.active_session_id.read().await, Some(copy));
     }
 }
