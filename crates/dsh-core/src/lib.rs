@@ -474,4 +474,16 @@ mod tests {
         assert!(state.delete_session(&second).await.unwrap());
         assert_eq!(*state.active_session_id.read().await, Some(copy));
     }
+
+    #[tokio::test]
+    async fn workspace_path_can_be_updated() {
+        let (state, _) = AppState::new(DaemonConfig::default());
+        state
+            .set_workspace_path(std::path::PathBuf::from("/tmp/workspace"))
+            .await;
+        assert_eq!(
+            *state.workspace_path.read().await,
+            std::path::PathBuf::from("/tmp/workspace")
+        );
+    }
 }

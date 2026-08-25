@@ -13,6 +13,13 @@ impl TitleBar {
             workspace_name: workspace.to_string(),
         }
     }
+
+    pub fn set_workspace_name(&mut self, workspace: &str, cx: &mut Context<Self>) {
+        if self.workspace_name != workspace {
+            self.workspace_name = workspace.to_string();
+            cx.notify();
+        }
+    }
 }
 
 impl Render for TitleBar {
@@ -30,7 +37,16 @@ impl Render for TitleBar {
                 div()
                     .flex_1()
                     .h_full()
-                    .window_control_area(WindowControlArea::Drag),
+                    .px_4()
+                    .flex()
+                    .items_center()
+                    .window_control_area(WindowControlArea::Drag)
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(0x61666b))
+                            .child(self.workspace_name.clone()),
+                    ),
             )
             // Right: macOS traffic-light controls with native window actions.
             .child(
