@@ -182,4 +182,17 @@ mod tests {
         );
         let _ = fs::remove_dir_all(&temp_dir);
     }
+
+    #[test]
+    fn rejects_unified_diff_when_context_does_not_match() {
+        let temp_dir = env::temp_dir().join(format!("dsh_diff_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let path = temp_dir.join("notes.txt");
+        fs::write(&path, "one\ntwo\n").unwrap();
+
+        let diff = "@@ -1,2 +1,2 @@\n one\n-three\n+THREE\n";
+        assert!(DiffApplier::apply_unified_diff(&temp_dir, "notes.txt", diff).is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "one\ntwo\n");
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
 }
