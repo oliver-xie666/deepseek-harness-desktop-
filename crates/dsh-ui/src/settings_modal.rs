@@ -3,7 +3,8 @@ use crate::model_catalog::model_options;
 use dsh_common::AppPaths;
 use dsh_core::{AppConfig, AppState, McpServerConfig, McpTransport};
 use gpui::{
-    div, prelude::*, px, rgb, Context, Entity, FontWeight, IntoElement, MouseButton, Window,
+    div, prelude::*, px, rgb, Context, Entity, FontWeight, IntoElement, MouseButton, ScrollHandle,
+    Window,
 };
 use std::sync::Arc;
 
@@ -22,6 +23,7 @@ pub struct SettingsModal {
     pub mcp_servers: Vec<McpServerConfig>,
     pub model_editing: bool,
     state: Entity<Arc<AppState>>,
+    content_scroll_handle: ScrollHandle,
 }
 
 impl SettingsModal {
@@ -45,6 +47,7 @@ impl SettingsModal {
             mcp_servers,
             model_editing: false,
             state,
+            content_scroll_handle: ScrollHandle::new(),
         }
     }
 
@@ -566,7 +569,15 @@ impl Render for SettingsModal {
                                             .child(icons::close(14.0, rgb(0x81858c))),
                                     ),
                             )
-                            .child(div().flex_1().p_6().overflow_hidden().child(body)),
+                            .child(
+                                div()
+                                    .id("settings-content")
+                                    .flex_1()
+                                    .p_6()
+                                    .overflow_y_scroll()
+                                    .track_scroll(&self.content_scroll_handle)
+                                    .child(body),
+                            ),
                     ),
             )
     }
@@ -602,6 +613,18 @@ fn nav_cell(
                 .text_color(if active { rgb(0x0f1115) } else { rgb(0x61666b) })
                 .child(label.to_string()),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn settings_body_uses_gpui_vertical_scroll_container() {
+        let source = include_str!("settings_modal.rs");
+        assert!(
+            source.matches(".overflow_y_scroll()").count() > 1,
+            "settings content must use GPUI's vertical scroll container"
+        );
+    }
 }
 
 fn page_heading(title: &str, description: &str) -> impl IntoElement {
