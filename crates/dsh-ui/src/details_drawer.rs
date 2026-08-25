@@ -1,4 +1,4 @@
-use gpui::{div, prelude::*, rgb, Context, FontWeight, IntoElement, Window};
+use gpui::{div, prelude::*, rgb, Context, FontWeight, IntoElement, ScrollHandle, Window};
 
 pub struct DetailsDrawer {
     pub is_open: bool,
@@ -6,6 +6,7 @@ pub struct DetailsDrawer {
     pub duration_ms: u64,
     pub args_json: String,
     pub output_raw: String,
+    content_scroll_handle: ScrollHandle,
 }
 
 impl Default for DetailsDrawer {
@@ -22,6 +23,7 @@ impl DetailsDrawer {
             duration_ms: 100,
             args_json: "{\n  \"query\": \"greet\",\n  \"path\": \"crates/\"\n}".into(),
             output_raw: "crates/dsh-core/src/lib.rs:84\n1 match found.".into(),
+            content_scroll_handle: ScrollHandle::new(),
         }
     }
 
@@ -64,6 +66,8 @@ impl Render for DetailsDrawer {
         let handle_copy_output = cx.listener(move |_this, _, _, cx| {
             cx.write_to_clipboard(output_to_copy.clone().into());
         });
+
+        let content_scroll_handle = self.content_scroll_handle.clone();
 
         div()
             .w_80()
@@ -118,7 +122,9 @@ impl Render for DetailsDrawer {
             .child(
                 div()
                     .flex_1()
-                    .overflow_hidden()
+                    .id("details-content")
+                    .overflow_y_scroll()
+                    .track_scroll(&content_scroll_handle)
                     .flex()
                     .flex_col()
                     .p_3()
@@ -204,4 +210,16 @@ fn copy_button(
         .cursor_pointer()
         .on_mouse_down(gpui::MouseButton::Left, handler)
         .child("复制")
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn details_body_uses_gpui_vertical_scroll_container() {
+        let source = include_str!("details_drawer.rs");
+        assert!(
+            source.matches(".overflow_y_scroll()").count() > 1,
+            "details drawer content must use GPUI's vertical scroll container"
+        );
+    }
 }
