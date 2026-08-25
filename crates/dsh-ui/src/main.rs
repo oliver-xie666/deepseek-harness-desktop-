@@ -100,6 +100,7 @@ fn main() {
     };
 
     let (app_state, outbox_rx) = AppState::new(daemon_config);
+    *app_state.workspace_path.blocking_write() = args.workspace.clone();
     let state_for_runtime = app_state.clone();
 
     // Start the daemon and its WebSocket client from the same AppState so the
