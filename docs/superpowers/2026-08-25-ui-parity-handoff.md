@@ -1,7 +1,8 @@
 # UI 持续优化交接
 
-**更新时间：** 2026-08-25  
-**基线：** `main` / `origin/main` 的 `7c6e7fa`（`merge: diff review feedback`）  
+**更新时间：** 2026-08-25
+
+**基线：** `main` / `origin/main` 的 `7c6e7fa`（`merge: diff review feedback`）
 **工作树：** 交接开始时干净；`.reasonix/` 与 `.superpowers/` 均为本机生成的忽略目录。
 
 本文件是后续会话的工作入口。它记录已经真实合入的功能、仍需完成的差距，以及继续推进时应遵循的分支和验证方式。
