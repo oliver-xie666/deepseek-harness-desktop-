@@ -6,6 +6,7 @@ use gpui::{
     deferred, div, prelude::*, px, rgb, Context, Entity, FontWeight, IntoElement, MouseButton,
     Subscription, Window,
 };
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,6 +22,8 @@ pub struct Sidebar {
     pub file_tree: Option<FileNode>,
     pub sessions: Vec<SessionItemView>,
     pub active_workspace: String,
+    active_workspace_path: PathBuf,
+    expanded_paths: HashSet<PathBuf>,
     pub collapsed: bool,
     search_open: bool,
     view_options_open: bool,
@@ -42,7 +45,7 @@ impl Sidebar {
         cx: &mut Context<Self>,
     ) -> Self {
         let initial_workspace = state.read(cx).workspace_path.blocking_read().clone();
-        let tree = WorkspaceScanner::scan_dir(&initial_workspace, 2).ok();
+        let tree = WorkspaceScanner::scan_dir(&initial_workspace, 6).ok();
         let initial_workspace_label = initial_workspace
             .file_name()
             .and_then(|name| name.to_str())
@@ -55,6 +58,8 @@ impl Sidebar {
             file_tree: tree,
             sessions: Vec::new(),
             active_workspace: initial_workspace_label,
+            active_workspace_path: initial_workspace.clone(),
+            expanded_paths: HashSet::from([initial_workspace.clone()]),
             collapsed: false,
             search_open: false,
             view_options_open: false,
@@ -94,7 +99,7 @@ impl Sidebar {
                     continue;
                 }
                 last_snapshot = snapshot;
-                let tree = WorkspaceScanner::scan_dir(&workspace, 2).ok();
+                let tree = WorkspaceScanner::scan_dir(&workspace, 6).ok();
                 let workspace_label = workspace
                     .file_name()
                     .and_then(|name| name.to_str())
@@ -104,6 +109,11 @@ impl Sidebar {
                     .update(cx, |sidebar, cx| {
                         sidebar.file_tree = tree.clone();
                         sidebar.active_workspace = workspace_label.clone();
+                        if sidebar.active_workspace_path != workspace {
+                            sidebar.active_workspace_path = workspace.clone();
+                            sidebar.expanded_paths.clear();
+                            sidebar.expanded_paths.insert(workspace.clone());
+                        }
                         sidebar.sessions = sessions
                             .iter()
                             .map(|session| SessionItemView {
@@ -209,12 +219,20 @@ impl Sidebar {
             .and_then(|name| name.to_str())
             .unwrap_or_else(|| path.to_str().unwrap_or("工作区"))
             .to_string();
-        self.file_tree = WorkspaceScanner::scan_dir(&path, 2).ok();
+        self.file_tree = WorkspaceScanner::scan_dir(&path, 6).ok();
         self.active_workspace = label;
+        self.active_workspace_path = path.clone();
+        self.expanded_paths.clear();
+        self.expanded_paths.insert(path.clone());
         self.workspace_menu_open = false;
         tokio::spawn(async move {
             state.set_workspace_path(path).await;
         });
+        cx.notify();
+    }
+
+    fn toggle_tree_path(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        toggle_tree_path(&mut self.expanded_paths, path);
         cx.notify();
     }
 
@@ -644,7 +662,11 @@ impl Render for Sidebar {
                                         .child("暂无会话")
                                         .into_any_element()
                                 })
-                                .child(file_tree_panel(self.file_tree.as_ref(), cx)),
+                                .child(file_tree_panel(
+                                    self.file_tree.as_ref(),
+                                    &self.expanded_paths,
+                                    cx,
+                                )),
                         )
                     }),
             )
@@ -705,7 +727,11 @@ fn menu_item(
         .child(label)
 }
 
-fn file_tree_panel(tree: Option<&FileNode>, cx: &mut Context<Sidebar>) -> impl IntoElement {
+fn file_tree_panel(
+    tree: Option<&FileNode>,
+    expanded_paths: &HashSet<PathBuf>,
+    cx: &mut Context<Sidebar>,
+) -> impl IntoElement {
     div()
         .mt_2()
         .pt_2()
@@ -723,7 +749,7 @@ fn file_tree_panel(tree: Option<&FileNode>, cx: &mut Context<Sidebar>) -> impl I
                 .child("Explorer"),
         )
         .child(if let Some(tree) = tree {
-            file_tree_node(tree, 0, cx).into_any_element()
+            file_tree_node(tree, 0, expanded_paths, cx).into_any_element()
         } else {
             div()
                 .px_1()
@@ -735,17 +761,40 @@ fn file_tree_panel(tree: Option<&FileNode>, cx: &mut Context<Sidebar>) -> impl I
         })
 }
 
-fn file_tree_node(node: &FileNode, depth: usize, cx: &mut Context<Sidebar>) -> impl IntoElement {
+fn file_tree_node(
+    node: &FileNode,
+    depth: usize,
+    expanded_paths: &HashSet<PathBuf>,
+    cx: &mut Context<Sidebar>,
+) -> impl IntoElement {
     let path = node.path.clone();
-    let handle_open = cx.listener(move |_this, _, _, cx| {
-        cx.open_with_system(&path);
+    let is_dir = node.is_dir;
+    let handle_click = cx.listener(move |this, _, _, cx| {
+        if is_dir {
+            this.toggle_tree_path(&path, cx);
+        } else {
+            cx.open_with_system(&path);
+        }
     });
-    let child_rows = node
-        .children
-        .iter()
-        .map(|child| file_tree_node(child, depth + 1, cx).into_any_element())
-        .collect::<Vec<_>>();
+    let is_expanded = !node.is_dir || expanded_paths.contains(&node.path);
+    let child_rows = if is_expanded {
+        node.children
+            .iter()
+            .map(|child| file_tree_node(child, depth + 1, expanded_paths, cx).into_any_element())
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     let indent = 8.0 + (depth as f32 * 12.0);
+    let disclosure = if node.is_dir {
+        if is_expanded {
+            "▾"
+        } else {
+            "▸"
+        }
+    } else {
+        " "
+    };
     div()
         .flex()
         .flex_col()
@@ -758,13 +807,14 @@ fn file_tree_node(node: &FileNode, depth: usize, cx: &mut Context<Sidebar>) -> i
                 .gap_1()
                 .hover(|style| style.bg(rgb(0xf1f3f5)))
                 .cursor_pointer()
-                .on_mouse_down(MouseButton::Left, handle_open)
+                .on_mouse_down(MouseButton::Left, handle_click)
                 .text_xs()
                 .text_color(if node.is_dir {
                     rgb(0x3f454d)
                 } else {
                     rgb(0x61666b)
                 })
+                .child(disclosure)
                 .child(node.icon.clone())
                 .child(node.name.clone()),
         )
@@ -813,7 +863,8 @@ fn workspace_from_prompt(selection: Option<Option<Vec<PathBuf>>>) -> Option<Path
 
 #[cfg(test)]
 mod tests {
-    use super::workspace_from_prompt;
+    use super::{toggle_tree_path, workspace_from_prompt};
+    use std::collections::HashSet;
     use std::path::PathBuf;
 
     #[test]
@@ -830,5 +881,25 @@ mod tests {
         assert_eq!(workspace_from_prompt(None), None);
         assert_eq!(workspace_from_prompt(Some(None)), None);
         assert_eq!(workspace_from_prompt(Some(Some(Vec::new()))), None);
+    }
+
+    #[test]
+    fn explorer_toggle_path_expands_then_collapses() {
+        let path = PathBuf::from("D:/projects/alpha/src");
+        let mut expanded = HashSet::new();
+        assert!(toggle_tree_path(&mut expanded, &path));
+        assert!(expanded.contains(&path));
+        assert!(!toggle_tree_path(&mut expanded, &path));
+        assert!(!expanded.contains(&path));
+    }
+}
+
+fn toggle_tree_path(expanded_paths: &mut HashSet<PathBuf>, path: &std::path::Path) -> bool {
+    if expanded_paths.contains(path) {
+        expanded_paths.remove(path);
+        false
+    } else {
+        expanded_paths.insert(path.to_path_buf());
+        true
     }
 }
