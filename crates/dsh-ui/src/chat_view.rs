@@ -10,7 +10,7 @@ use dsh_markdown::{
 };
 use gpui::{
     deferred, div, prelude::*, px, rgb, rgba, Context, Entity, FontWeight, IntoElement,
-    Subscription, Window,
+    ScrollHandle, Subscription, Window,
 };
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -63,6 +63,7 @@ pub struct ChatView {
     pub trace_collapsed_turns: HashSet<usize>,
     trace_entries: Vec<TraceEntry>,
     session_log_lines: Vec<String>,
+    session_log_scroll_handle: ScrollHandle,
     trace_search_input: Entity<TextInput>,
     _trace_search_subscription: Subscription,
 }
@@ -90,8 +91,26 @@ mod diff_notice_tests {
     }
 }
 
+#[cfg(test)]
+mod session_log_tests {
+    use super::session_log_display_lines;
+
+    #[test]
+    fn session_log_display_keeps_all_lines_in_newest_first_order() {
+        let lines = vec!["one".to_string(), "two".to_string(), "three".to_string()];
+        assert_eq!(
+            session_log_display_lines(&lines),
+            vec!["three", "two", "one"]
+        );
+    }
+}
+
 fn record_diff_result(notice: &mut Option<String>, error: Option<String>, action: &str) {
     *notice = error.map(|error| format!("{}：{}", action, error));
+}
+
+fn session_log_display_lines(lines: &[String]) -> Vec<String> {
+    lines.iter().rev().cloned().collect()
 }
 
 impl ChatView {
@@ -137,6 +156,7 @@ impl ChatView {
             trace_collapsed_turns: HashSet::new(),
             trace_entries: Vec::new(),
             session_log_lines: Vec::new(),
+            session_log_scroll_handle: ScrollHandle::new(),
             trace_search_input: trace_search_input.clone(),
             _trace_search_subscription: cx.observe(&trace_search_input, |_, _, cx| cx.notify()),
         };
@@ -350,6 +370,7 @@ impl ChatView {
                     view.streaming_text = text;
                     view.trace_entries = trace_entries;
                     view.session_log_lines = session.terminal_logs.clone();
+                    view.session_log_scroll_handle.scroll_to_bottom();
                     view.conversation_messages = session.messages.clone();
                     view.active_session_id = Some(session.id.clone());
                     let mut pending_diffs = session
@@ -833,26 +854,31 @@ impl ChatView {
                         .text_xs()
                         .text_color(rgb(0x61666b))
                         .child(format!("Session log · {} 行", self.session_log_lines.len()))
-                        .children(if self.session_log_lines.is_empty() {
-                            vec![div()
-                                .text_xs()
-                                .text_color(rgb(0x81858c))
-                                .child("当前会话尚无终端日志")
-                                .into_any_element()]
-                        } else {
-                            self.session_log_lines
-                                .iter()
-                                .rev()
-                                .take(6)
-                                .map(|line| {
-                                    div()
+                        .child(
+                            div()
+                                .id("session-log-content")
+                                .max_h(px(180.0))
+                                .overflow_y_scroll()
+                                .track_scroll(&self.session_log_scroll_handle)
+                                .children(if self.session_log_lines.is_empty() {
+                                    vec![div()
                                         .text_xs()
-                                        .text_color(rgb(0x3f454d))
-                                        .child(line.clone())
-                                        .into_any_element()
-                                })
-                                .collect()
-                        }),
+                                        .text_color(rgb(0x81858c))
+                                        .child("当前会话尚无终端日志")
+                                        .into_any_element()]
+                                } else {
+                                    session_log_display_lines(&self.session_log_lines)
+                                        .into_iter()
+                                        .map(|line| {
+                                            div()
+                                                .text_xs()
+                                                .text_color(rgb(0x3f454d))
+                                                .child(line)
+                                                .into_any_element()
+                                        })
+                                        .collect()
+                                }),
+                        ),
                 )
             })
             .child(
