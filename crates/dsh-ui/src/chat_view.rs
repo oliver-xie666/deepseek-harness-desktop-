@@ -1,7 +1,7 @@
 use crate::details_drawer::DetailsDrawer;
 use crate::dropdown::{AgentPresetSelector, WorkspaceSelector};
 use crate::icons;
-use crate::model_catalog::model_options;
+use crate::model_catalog::provider_groups;
 use crate::text_input::TextInput;
 use dsh_common::AppPaths;
 use dsh_core::AppState;
@@ -1096,7 +1096,7 @@ impl ChatView {
         let current = self.model_name.clone();
         let is_open = self.model_open;
         let handle_toggle = cx.listener(|this, _, _, cx| this.toggle_model(cx));
-        let models = model_options(&current);
+        let groups = provider_groups(&current);
 
         div()
             .relative()
@@ -1125,7 +1125,10 @@ impl ChatView {
                         .absolute()
                         .bottom(px(34.0))
                         .right(px(0.0))
-                        .w(px(190.0))
+                        .w(px(240.0))
+                        .max_h(px(320.0))
+                        .id("model-selector-menu")
+                        .overflow_y_scroll()
                         .p_1()
                         .rounded_lg()
                         .bg(rgb(0xffffff))
@@ -1134,13 +1137,31 @@ impl ChatView {
                         .shadow_lg()
                         .flex()
                         .flex_col()
-                        .children(models.into_iter().map(|model| {
-                            let selected = current == model;
-                            let model_for_handler = model.clone();
-                            let handle = cx.listener(move |this, _, _, cx| {
-                                this.set_model(&model_for_handler, cx);
-                            });
-                            menu_choice(&model, selected, handle).into_any_element()
+                        .gap_1()
+                        .children(groups.into_iter().map(|group| {
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_0p5()
+                                .child(
+                                    div()
+                                        .px_2()
+                                        .pt_1()
+                                        .pb_0p5()
+                                        .text_xs()
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(rgb(0x81858c))
+                                        .child(group.provider),
+                                )
+                                .children(group.models.into_iter().map(|model| {
+                                    let selected = current == model;
+                                    let model_for_handler = model.clone();
+                                    let handle = cx.listener(move |this, _, _, cx| {
+                                        this.set_model(&model_for_handler, cx);
+                                    });
+                                    menu_choice(&model, selected, handle).into_any_element()
+                                }))
+                                .into_any_element()
                         })),
                 )
             })

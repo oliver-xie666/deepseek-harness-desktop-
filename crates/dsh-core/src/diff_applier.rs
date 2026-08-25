@@ -48,12 +48,24 @@ impl DiffApplier {
         fs::read_to_string(&path).map_err(DshError::Io)
     }
 
+    /// Deletes a relative workspace file if it exists
+    pub fn delete_file(workspace_root: &Path, rel_path: &str) -> Result<PathBuf> {
+        let target_path = workspace_root.join(rel_path);
+        if target_path.exists() {
+            fs::remove_file(&target_path).map_err(DshError::Io)?;
+            info!("Successfully deleted file {}", target_path.display());
+        }
+        Ok(target_path)
+    }
+
     pub fn apply_unified_diff(
         workspace_root: &Path,
         rel_path: &str,
         diff_content: &str,
     ) -> Result<PathBuf> {
         let target_path = workspace_root.join(rel_path);
+        let is_deletion = diff_content.lines().any(|l| l.starts_with("+++ /dev/null"));
+
         let original = if target_path.exists() {
             fs::read_to_string(&target_path)?
         } else {
@@ -63,6 +75,7 @@ impl DiffApplier {
         let mut source_index = 0;
         let mut output = Vec::new();
         let mut in_hunk = false;
+        let mut has_no_newline_directive = false;
 
         for line in diff_content.lines() {
             if line.starts_with("--- ") || line.starts_with("+++ ") {
@@ -88,6 +101,13 @@ impl DiffApplier {
                 continue;
             }
 
+            if line.starts_with('\\') {
+                if line.contains("No newline at end of file") {
+                    has_no_newline_directive = true;
+                }
+                continue;
+            }
+
             let (prefix, content) = line.split_at(1);
             match prefix {
                 " " => {
@@ -100,7 +120,6 @@ impl DiffApplier {
                     source_index += 1;
                 }
                 "+" => output.push(content.to_string()),
-                "\\" => {}
                 _ => return Err(DshError::Protocol("unsupported unified diff line".into())),
             }
         }
@@ -108,15 +127,30 @@ impl DiffApplier {
         if !in_hunk {
             return Err(DshError::Protocol("unified diff has no hunk".into()));
         }
+
+        if is_deletion && output.is_empty() {
+            return Self::delete_file(workspace_root, rel_path);
+        }
+
         output.extend(
             source[source_index..]
                 .iter()
                 .map(|line| (*line).to_string()),
         );
+
         let mut updated = output.join("\n");
-        if original.ends_with('\n') {
+        let should_have_trailing_newline = if has_no_newline_directive {
+            false
+        } else if target_path.exists() {
+            original.ends_with('\n')
+        } else {
+            !output.is_empty()
+        };
+
+        if should_have_trailing_newline && !updated.is_empty() {
             updated.push('\n');
         }
+
         Self::apply_file_content(workspace_root, rel_path, &updated)
     }
 }
@@ -179,6 +213,51 @@ mod tests {
         assert_eq!(
             fs::read_to_string(temp_dir.join("notes.txt")).unwrap(),
             "one\nTWO\nthree\n"
+        );
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn creates_new_file_from_unified_diff() {
+        let temp_dir = env::temp_dir().join(format!("dsh_diff_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let diff = "--- /dev/null\n+++ b/new_doc.md\n@@ -0,0 +1,3 @@\n+# Title\n+\n+Hello world\n";
+        DiffApplier::apply_unified_diff(&temp_dir, "new_doc.md", diff).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(temp_dir.join("new_doc.md")).unwrap(),
+            "# Title\n\nHello world\n"
+        );
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn deletes_file_from_unified_diff() {
+        let temp_dir = env::temp_dir().join(format!("dsh_diff_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let file_path = temp_dir.join("obsolete.txt");
+        fs::write(&file_path, "to be deleted\n").unwrap();
+        assert!(file_path.exists());
+
+        let diff = "--- a/obsolete.txt\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-to be deleted\n";
+        DiffApplier::apply_unified_diff(&temp_dir, "obsolete.txt", diff).unwrap();
+
+        assert!(!file_path.exists());
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn handles_no_newline_at_end_of_file() {
+        let temp_dir = env::temp_dir().join(format!("dsh_diff_{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&temp_dir).unwrap();
+
+        let diff = "--- /dev/null\n+++ b/single_line.txt\n@@ -0,0 +1,1 @@\n+single line\n\\ No newline at end of file\n";
+        DiffApplier::apply_unified_diff(&temp_dir, "single_line.txt", diff).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(temp_dir.join("single_line.txt")).unwrap(),
+            "single line"
         );
         let _ = fs::remove_dir_all(&temp_dir);
     }

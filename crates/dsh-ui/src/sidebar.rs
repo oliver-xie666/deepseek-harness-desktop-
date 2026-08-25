@@ -231,6 +231,11 @@ impl Sidebar {
         cx.notify();
     }
 
+    fn refresh_tree(&mut self, cx: &mut Context<Self>) {
+        self.file_tree = WorkspaceScanner::scan_dir(&self.active_workspace_path, 6).ok();
+        cx.notify();
+    }
+
     fn toggle_tree_path(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
         toggle_tree_path(&mut self.expanded_paths, path);
         cx.notify();
@@ -449,9 +454,18 @@ impl Render for Sidebar {
                                                 .flex()
                                                 .items_center()
                                                 .gap_1()
-                                                .child(sidebar_icon("⌕", handle_search))
-                                                .child(sidebar_icon("☷", handle_view))
-                                                .child(sidebar_icon("+", handle_workspace)),
+                                                .child(sidebar_icon_btn(
+                                                    icons::search(13.0, rgb(0x81858c)),
+                                                    handle_search,
+                                                ))
+                                                .child(sidebar_icon_btn(
+                                                    icons::view_options(13.0, rgb(0x81858c)),
+                                                    handle_view,
+                                                ))
+                                                .child(sidebar_icon_btn(
+                                                    icons::add_workspace(13.0, rgb(0x81858c)),
+                                                    handle_workspace,
+                                                )),
                                         ),
                                 )
                                 .when(self.search_open, |this| {
@@ -554,7 +568,6 @@ impl Render for Sidebar {
                                                     .items_center()
                                                     .justify_center()
                                                     .rounded(px(6.0))
-                                                    .text_size(px(17.0))
                                                     .text_color(rgb(0x81858c))
                                                     .hover(|s| {
                                                         s.bg(rgb(0xe1e5eb))
@@ -562,7 +575,7 @@ impl Render for Sidebar {
                                                     })
                                                     .cursor_pointer()
                                                     .on_mouse_down(MouseButton::Left, handle_commit)
-                                                    .child("✓")
+                                                    .child(icons::check(14.0, rgb(0x0f1115)))
                                                     .into_any_element()
                                             } else {
                                                 div()
@@ -571,7 +584,6 @@ impl Render for Sidebar {
                                                     .items_center()
                                                     .justify_center()
                                                     .rounded(px(6.0))
-                                                    .text_size(px(17.0))
                                                     .text_color(rgb(0x81858c))
                                                     .hover(|s| {
                                                         s.bg(rgb(0xe1e5eb))
@@ -579,7 +591,10 @@ impl Render for Sidebar {
                                                     })
                                                     .cursor_pointer()
                                                     .on_mouse_down(MouseButton::Left, handle_more)
-                                                    .child("⋯")
+                                                    .child(icons::more_horizontal(
+                                                        14.0,
+                                                        rgb(0x81858c),
+                                                    ))
                                                     .into_any_element()
                                             };
 
@@ -691,8 +706,8 @@ impl Render for Sidebar {
     }
 }
 
-fn sidebar_icon(
-    glyph: &'static str,
+fn sidebar_icon_btn(
+    icon: impl IntoElement,
     handler: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
 ) -> impl IntoElement {
     div()
@@ -701,12 +716,11 @@ fn sidebar_icon(
         .items_center()
         .justify_center()
         .rounded(px(6.0))
-        .text_size(px(16.0))
         .text_color(rgb(0x81858c))
         .hover(|s| s.bg(rgb(0xe1e5eb)).text_color(rgb(0x0f1115)))
         .cursor_pointer()
         .on_mouse_down(MouseButton::Left, handler)
-        .child(glyph)
+        .child(icon)
 }
 
 fn menu_item(
@@ -742,11 +756,23 @@ fn file_tree_panel(
         .gap_0p5()
         .child(
             div()
+                .flex()
+                .items_center()
+                .justify_between()
                 .px_1()
-                .text_xs()
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(rgb(0x61666b))
-                .child("Explorer"),
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(rgb(0x61666b))
+                        .child("Explorer"),
+                )
+                .child({
+                    let handle_refresh = cx.listener(|this, _, _, cx| {
+                        this.refresh_tree(cx);
+                    });
+                    sidebar_icon_btn(icons::refresh(12.0, rgb(0x81858c)), handle_refresh)
+                }),
         )
         .child(if let Some(tree) = tree {
             file_tree_node(tree, 0, expanded_paths, cx).into_any_element()
