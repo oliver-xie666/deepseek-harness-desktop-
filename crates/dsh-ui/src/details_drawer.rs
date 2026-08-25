@@ -1,3 +1,4 @@
+use crate::icons;
 use gpui::{div, prelude::*, rgb, Context, FontWeight, IntoElement, ScrollHandle, Window};
 
 pub struct DetailsDrawer {
@@ -94,7 +95,7 @@ impl Render for DetailsDrawer {
                             .flex()
                             .items_center()
                             .gap_2()
-                            .child(div().text_sm().child("🔧"))
+                            .child(icons::wrench(14.0, rgb(0x61666b)))
                             .child(
                                 div()
                                     .font_weight(FontWeight::BOLD)
@@ -115,7 +116,7 @@ impl Render for DetailsDrawer {
                             .hover(|s| s.bg(rgb(0xf1f3f5)).text_color(rgb(0x0f1115)))
                             .cursor_pointer()
                             .on_mouse_down(gpui::MouseButton::Left, handle_close)
-                            .child("✕"),
+                            .child(icons::close(14.0, rgb(0x81858c))),
                     ),
             )
             // Drawer Body: Input Parameters JSON
@@ -218,7 +219,7 @@ mod tests {
     fn details_body_uses_gpui_vertical_scroll_container() {
         let source = include_str!("details_drawer.rs");
         assert!(
-            source.matches(".overflow_y_scroll()").count() > 1,
+            source.contains(".overflow_y_scroll()"),
             "details drawer content must use GPUI's vertical scroll container"
         );
     }

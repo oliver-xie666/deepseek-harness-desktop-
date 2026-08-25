@@ -119,6 +119,60 @@ pub fn check(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
         .h(px(size))
 }
 
+/// Search glyph (sidebar session search).
+pub fn search(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("search.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
+
+/// View options / filter glyph (sidebar options).
+pub fn view_options(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("view_options.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
+
+/// Add workspace glyph.
+pub fn add_workspace(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("add_workspace.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
+
+/// More horizontal options `⋯` glyph.
+pub fn more_horizontal(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("more_horizontal.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
+
+/// Wrench / tool glyph.
+pub fn wrench(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("wrench.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
+
+/// Refresh glyph.
+pub fn refresh(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("refresh.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
+
 /// The soft blue hero backdrop ellipse (native 1051×468).
 pub fn glow(width: f32, height: f32, color: impl Into<Hsla>) -> impl IntoElement {
     svg()
