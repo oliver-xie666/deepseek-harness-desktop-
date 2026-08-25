@@ -55,6 +55,7 @@ pub struct ChatView {
     conversation_messages: Vec<dsh_core::ChatMessage>,
     active_session_id: Option<String>,
     pending_diffs: Vec<dsh_core::FileDiffItem>,
+    diff_notice: Option<String>,
     active_view: SessionView,
     pub session_log_open: bool,
     pub trace_actual_duration: bool,
@@ -101,6 +102,7 @@ impl ChatView {
             conversation_messages: Vec::new(),
             active_session_id: None,
             pending_diffs: Vec::new(),
+            diff_notice: None,
             active_view: SessionView::Chat,
             session_log_open: false,
             trace_actual_duration: false,
@@ -1376,16 +1378,28 @@ impl ChatView {
                 let session_id = self.active_session_id.clone();
                 let diff_id = diff.id.clone();
                 let diff_content = diff.diff_content.clone();
+                let file_path = diff.file_path.clone();
                 let handle_apply = cx.listener(move |_this, _, _, cx| {
                     let state = state.read(cx).clone();
                     let session_id = session_id.clone();
                     let diff_id = diff_id.clone();
                     let diff_content = diff_content.clone();
-                    tokio::spawn(async move {
+                    let file_path = file_path.clone();
+                    cx.spawn(async move |this, cx| {
                         if let Some(session_id) = session_id {
-                            let _ = state.apply_diff(&session_id, &diff_id, &diff_content).await;
+                            if let Err(error) =
+                                state.apply_diff(&session_id, &diff_id, &diff_content).await
+                            {
+                                this.update(cx, |view, cx| {
+                                    view.diff_notice =
+                                        Some(format!("无法应用 {}：{}", file_path, error));
+                                    cx.notify();
+                                })?;
+                            }
                         }
-                    });
+                        Ok::<(), anyhow::Error>(())
+                    })
+                    .detach();
                 });
                 let state = self.state.clone();
                 let session_id = self.active_session_id.clone();
@@ -1394,11 +1408,18 @@ impl ChatView {
                     let state = state.read(cx).clone();
                     let session_id = session_id.clone();
                     let diff_id = diff_id.clone();
-                    tokio::spawn(async move {
+                    cx.spawn(async move |this, cx| {
                         if let Some(session_id) = session_id {
-                            let _ = state.reject_diff(&session_id, &diff_id).await;
+                            if let Err(error) = state.reject_diff(&session_id, &diff_id).await {
+                                this.update(cx, |view, cx| {
+                                    view.diff_notice = Some(format!("无法拒绝变更：{}", error));
+                                    cx.notify();
+                                })?;
+                            }
                         }
-                    });
+                        Ok::<(), anyhow::Error>(())
+                    })
+                    .detach();
                 });
                 div()
                     .flex()
@@ -1457,6 +1478,17 @@ impl ChatView {
                             .max_w_full()
                             .p_4()
                             .children(message_rows)
+                            .when_some(self.diff_notice.as_ref(), |this, notice| {
+                                this.child(
+                                    div()
+                                        .p_2()
+                                        .rounded_md()
+                                        .bg(rgb(0xffecec))
+                                        .text_xs()
+                                        .text_color(rgb(0xb42318))
+                                        .child(notice.clone()),
+                                )
+                            })
                             .children(diff_rows),
                     ),
             )
