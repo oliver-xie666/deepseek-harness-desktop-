@@ -53,6 +53,8 @@ pub struct ChatView {
     pub model_name: String,
     plus_menu_open: bool,
     conversation_messages: Vec<dsh_core::ChatMessage>,
+    active_session_id: Option<String>,
+    pending_diffs: Vec<dsh_core::FileDiffItem>,
     active_view: SessionView,
     pub session_log_open: bool,
     pub trace_actual_duration: bool,
@@ -97,6 +99,8 @@ impl ChatView {
             model_name: "gpt-5.6-luna".into(),
             plus_menu_open: false,
             conversation_messages: Vec::new(),
+            active_session_id: None,
+            pending_diffs: Vec::new(),
             active_view: SessionView::Chat,
             session_log_open: false,
             trace_actual_duration: false,
@@ -192,9 +196,21 @@ impl ChatView {
                     continue;
                 };
 
+                let diff_key = session
+                    .diffs
+                    .values()
+                    .map(|diff| format!("{}:{:?}:{}", diff.id, diff.accepted, diff.diff_content))
+                    .collect::<Vec<_>>()
+                    .join("|");
                 let snapshot_key = format!(
-                    "{}:{}:{}:{}:{}:{}",
-                    session.id, session.title, text, permission_mode, model_name, preset_name
+                    "{}:{}:{}:{}:{}:{}:{}",
+                    session.id,
+                    session.title,
+                    text,
+                    permission_mode,
+                    model_name,
+                    preset_name,
+                    diff_key
                 );
                 if snapshot_key == last_snapshot {
                     continue;
@@ -306,6 +322,15 @@ impl ChatView {
                     view.trace_entries = trace_entries;
                     view.session_log_lines = session.terminal_logs.clone();
                     view.conversation_messages = session.messages.clone();
+                    view.active_session_id = Some(session.id.clone());
+                    let mut pending_diffs = session
+                        .diffs
+                        .values()
+                        .filter(|diff| diff.accepted.is_none())
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    pending_diffs.sort_by(|left, right| left.file_path.cmp(&right.file_path));
+                    view.pending_diffs = pending_diffs;
                     cx.notify();
                 })?;
             }
@@ -1343,6 +1368,72 @@ impl ChatView {
                     })
                     .collect()
             };
+        let diff_rows = self
+            .pending_diffs
+            .iter()
+            .map(|diff| {
+                let state = self.state.clone();
+                let session_id = self.active_session_id.clone();
+                let diff_id = diff.id.clone();
+                let diff_content = diff.diff_content.clone();
+                let handle_apply = cx.listener(move |_this, _, _, cx| {
+                    let state = state.read(cx).clone();
+                    let session_id = session_id.clone();
+                    let diff_id = diff_id.clone();
+                    let diff_content = diff_content.clone();
+                    tokio::spawn(async move {
+                        if let Some(session_id) = session_id {
+                            let _ = state.apply_diff(&session_id, &diff_id, &diff_content).await;
+                        }
+                    });
+                });
+                let state = self.state.clone();
+                let session_id = self.active_session_id.clone();
+                let diff_id = diff.id.clone();
+                let handle_reject = cx.listener(move |_this, _, _, cx| {
+                    let state = state.read(cx).clone();
+                    let session_id = session_id.clone();
+                    let diff_id = diff_id.clone();
+                    tokio::spawn(async move {
+                        if let Some(session_id) = session_id {
+                            let _ = state.reject_diff(&session_id, &diff_id).await;
+                        }
+                    });
+                });
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .p_3()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(rgb(0x9bb8ff))
+                    .bg(rgb(0xf5f8ff))
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(rgb(0x0f1115))
+                            .child(diff.file_path.clone()),
+                    )
+                    .child(
+                        div()
+                            .max_h(px(96.0))
+                            .overflow_hidden()
+                            .text_xs()
+                            .text_color(rgb(0x3f454d))
+                            .child(diff.diff_content.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .child(menu_choice("应用", false, handle_apply))
+                            .child(menu_choice("拒绝", false, handle_reject)),
+                    )
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
 
         div()
             .flex_1()
@@ -1359,26 +1450,14 @@ impl ChatView {
                     .flex_col()
                     .gap_4()
                     .child(
-                        div().flex().justify_end().child(
-                            div()
-                                .max_w_3_4()
-                                .px_4()
-                                .py_2p5()
-                                .rounded_2xl()
-                                .bg(rgb(0xe8f0ff))
-                                .text_sm()
-                                .text_color(rgb(0x0f1115))
-                                .child(user_prompt.to_string()),
-                        ),
-                    )
-                    .child(
                         div()
                             .flex()
                             .flex_col()
                             .gap_3()
                             .max_w_full()
                             .p_4()
-                            .children(message_rows),
+                            .children(message_rows)
+                            .children(diff_rows),
                     ),
             )
     }

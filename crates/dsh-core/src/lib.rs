@@ -259,14 +259,14 @@ impl AppState {
         &self,
         session_id: &str,
         diff_id: &str,
-        new_content: &str,
+        diff_content: &str,
     ) -> Result<()> {
         let workspace = self.workspace_path.read().await.clone();
         let mut sessions = self.sessions.write().await;
 
         if let Some(session) = sessions.get_mut(session_id) {
             if let Some(diff) = session.diffs.get_mut(diff_id) {
-                DiffApplier::apply_file_content(&workspace, &diff.file_path, new_content)?;
+                DiffApplier::apply_unified_diff(&workspace, &diff.file_path, diff_content)?;
                 diff.accepted = Some(true);
                 let _ = SessionPersistence::save_session(&AppPaths::data_dir(), session);
             }
