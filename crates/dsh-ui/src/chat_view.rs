@@ -8,6 +8,7 @@ use dsh_core::AppState;
 use dsh_markdown::{
     CodeHighlighter, InlineSpan, MarkdownBlock, StreamingMarkdownParser, TokenType,
 };
+use dsh_protocol::ToolStatus;
 use gpui::{
     deferred, div, prelude::*, px, rgb, rgba, Context, Entity, FontWeight, IntoElement,
     ScrollHandle, Subscription, Window,
@@ -31,6 +32,7 @@ struct TraceEntry {
     args: String,
     output: String,
     duration_ms: u64,
+    tool_status: Option<ToolStatus>,
 }
 
 pub struct ChatView {
@@ -105,12 +107,41 @@ mod session_log_tests {
     }
 }
 
+#[cfg(test)]
+mod tool_status_tests {
+    use super::tool_status_label;
+    use dsh_protocol::ToolStatus;
+
+    #[test]
+    fn tool_status_labels_cover_running_success_and_failure() {
+        assert_eq!(tool_status_label(ToolStatus::Running), "运行中");
+        assert_eq!(tool_status_label(ToolStatus::Success), "成功");
+        assert_eq!(tool_status_label(ToolStatus::Failed), "失败");
+    }
+}
+
 fn record_diff_result(notice: &mut Option<String>, error: Option<String>, action: &str) {
     *notice = error.map(|error| format!("{}：{}", action, error));
 }
 
 fn session_log_display_lines(lines: &[String]) -> Vec<String> {
     lines.iter().rev().cloned().collect()
+}
+
+fn tool_status_label(status: ToolStatus) -> &'static str {
+    match status {
+        ToolStatus::Running => "运行中",
+        ToolStatus::Success => "成功",
+        ToolStatus::Failed => "失败",
+    }
+}
+
+fn tool_status_color(status: ToolStatus) -> gpui::Rgba {
+    match status {
+        ToolStatus::Running => rgba(0xb7791fFF),
+        ToolStatus::Success => rgba(0x16803cFF),
+        ToolStatus::Failed => rgba(0xb42318FF),
+    }
 }
 
 impl ChatView {
@@ -251,15 +282,30 @@ impl ChatView {
                     .map(|diff| format!("{}:{:?}:{}", diff.id, diff.accepted, diff.diff_content))
                     .collect::<Vec<_>>()
                     .join("|");
+                let tool_key = session
+                    .messages
+                    .iter()
+                    .flat_map(|message| message.tool_calls.iter())
+                    .map(|tool| {
+                        format!(
+                            "{}:{:?}:{}:{:?}",
+                            tool.id, tool.status, tool.duration_ms, tool.output
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("|");
+                let log_key = session.terminal_logs.join("\n");
                 let snapshot_key = format!(
-                    "{}:{}:{}:{}:{}:{}:{}",
+                    "{}:{}:{}:{}:{}:{}:{}:{}:{}",
                     session.id,
                     session.title,
                     text,
                     permission_mode,
                     model_name,
                     preset_name,
-                    diff_key
+                    diff_key,
+                    tool_key,
+                    log_key
                 );
                 if snapshot_key == last_snapshot {
                     continue;
@@ -302,6 +348,7 @@ impl ChatView {
                                 args: String::new(),
                                 output: String::new(),
                                 duration_ms: 0,
+                                tool_status: None,
                             });
                         }
                         dsh_core::MessageSender::Assistant => {
@@ -317,6 +364,7 @@ impl ChatView {
                                     .iter()
                                     .map(|tool| tool.duration_ms)
                                     .sum(),
+                                tool_status: None,
                             });
                             for tool in &message.tool_calls {
                                 trace_entries.push(TraceEntry {
@@ -331,6 +379,7 @@ impl ChatView {
                                         .map(ToString::to_string)
                                         .unwrap_or_else(|| "等待工具返回".into()),
                                     duration_ms: tool.duration_ms,
+                                    tool_status: Some(tool.status),
                                 });
                             }
                         }
@@ -342,6 +391,7 @@ impl ChatView {
                             args: String::new(),
                             output: message.content.clone(),
                             duration_ms: 0,
+                            tool_status: None,
                         }),
                     }
                 }
@@ -1233,6 +1283,15 @@ impl ChatView {
                                     .text_ellipsis()
                                     .child(entry.title),
                             )
+                            .when_some(entry.tool_status, |this, status| {
+                                this.child(
+                                    div()
+                                        .w(px(42.0))
+                                        .text_xs()
+                                        .text_color(tool_status_color(status))
+                                        .child(tool_status_label(status)),
+                                )
+                            })
                             .child(
                                 div()
                                     .w(px(50.0))
@@ -1340,89 +1399,101 @@ impl ChatView {
             &self.active_prompt
         };
 
-        let message_rows =
-            if self.conversation_messages.is_empty() {
-                vec![div()
-                    .text_sm()
-                    .text_color(rgb(0x81858c))
-                    .child(user_prompt.to_string())
-                    .into_any_element()]
-            } else {
-                self.conversation_messages
-                    .iter()
-                    .map(|message| match message.sender {
-                        dsh_core::MessageSender::User => div()
-                            .flex()
-                            .justify_end()
-                            .child(
-                                div()
-                                    .max_w_3_4()
-                                    .px_4()
-                                    .py_2p5()
-                                    .rounded_2xl()
-                                    .bg(rgb(0xe8f0ff))
-                                    .text_sm()
-                                    .text_color(rgb(0x0f1115))
-                                    .child(message.content.clone()),
-                            )
-                            .into_any_element(),
-                        dsh_core::MessageSender::Assistant => div()
-                            .flex()
-                            .flex_col()
-                            .gap_3()
-                            .max_w_full()
-                            .p_4()
-                            .children(message.tool_calls.iter().map(|tool| {
-                                let drawer_entity = self.details_drawer.clone();
-                                let title = tool.tool_name.clone();
-                                let args = tool.input.to_string();
-                                let output = tool
-                                    .output
-                                    .as_ref()
-                                    .map(ToString::to_string)
-                                    .unwrap_or_else(|| "等待工具返回".into());
-                                let duration = tool.duration_ms;
-                                let handle_tool_click = cx.listener(move |_this, _, _, cx| {
-                                    drawer_entity.update(cx, |drawer, cx| {
-                                        drawer.open_tool(&title, duration, &args, &output, cx);
-                                    });
+        let message_rows = if self.conversation_messages.is_empty() {
+            vec![div()
+                .text_sm()
+                .text_color(rgb(0x81858c))
+                .child(user_prompt.to_string())
+                .into_any_element()]
+        } else {
+            self.conversation_messages
+                .iter()
+                .map(|message| match message.sender {
+                    dsh_core::MessageSender::User => div()
+                        .flex()
+                        .justify_end()
+                        .child(
+                            div()
+                                .max_w_3_4()
+                                .px_4()
+                                .py_2p5()
+                                .rounded_2xl()
+                                .bg(rgb(0xe8f0ff))
+                                .text_sm()
+                                .text_color(rgb(0x0f1115))
+                                .child(message.content.clone()),
+                        )
+                        .into_any_element(),
+                    dsh_core::MessageSender::Assistant => div()
+                        .flex()
+                        .flex_col()
+                        .gap_3()
+                        .max_w_full()
+                        .p_4()
+                        .children(message.tool_calls.iter().map(|tool| {
+                            let drawer_entity = self.details_drawer.clone();
+                            let title = tool.tool_name.clone();
+                            let args = tool.input.to_string();
+                            let output = tool
+                                .output
+                                .as_ref()
+                                .map(ToString::to_string)
+                                .unwrap_or_else(|| "等待工具返回".into());
+                            let duration = tool.duration_ms;
+                            let status = tool.status;
+                            let status_label = tool_status_label(status);
+                            let status_color = tool_status_color(status);
+                            let handle_tool_click = cx.listener(move |_this, _, _, cx| {
+                                drawer_entity.update(cx, |drawer, cx| {
+                                    drawer.open_tool(&title, duration, &args, &output, cx);
                                 });
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .px_3()
-                                    .py_1p5()
-                                    .rounded_md()
-                                    .bg(rgb(0xf5f6f8))
-                                    .border_1()
-                                    .border_color(rgb(0xe1e5eb))
-                                    .hover(|s| s.bg(rgb(0xf1f3f5)).border_color(rgb(0x3964fe)))
-                                    .cursor_pointer()
-                                    .on_mouse_down(gpui::MouseButton::Left, handle_tool_click)
-                                    .child(icons::agent_preset(14.0, rgb(0x61666b)))
-                                    .child(div().text_xs().text_color(rgb(0x61666b)).child(
-                                        format!("{} ({}ms)", tool.tool_name, tool.duration_ms),
-                                    ))
-                                    .into_any_element()
-                            }))
-                            .children(
-                                StreamingMarkdownParser::parse_markdown(&message.content)
-                                    .into_iter()
-                                    .map(|block| self.render_markdown_block(block)),
-                            )
-                            .into_any_element(),
-                        dsh_core::MessageSender::System => div()
-                            .p_3()
-                            .rounded_md()
-                            .bg(rgb(0xf5f6f8))
-                            .text_xs()
-                            .text_color(rgb(0x61666b))
-                            .child(message.content.clone())
-                            .into_any_element(),
-                    })
-                    .collect()
-            };
+                            });
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .px_3()
+                                .py_1p5()
+                                .rounded_md()
+                                .bg(rgb(0xf5f6f8))
+                                .border_1()
+                                .border_color(status_color)
+                                .hover(|s| s.bg(rgb(0xf1f3f5)).border_color(rgb(0x3964fe)))
+                                .cursor_pointer()
+                                .on_mouse_down(gpui::MouseButton::Left, handle_tool_click)
+                                .child(icons::agent_preset(14.0, status_color))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(rgb(0x61666b))
+                                        .child(format!("{} ({})", tool.tool_name, status_label)),
+                                )
+                                .child(div().text_xs().text_color(status_color).child(
+                                    if status == ToolStatus::Running {
+                                        "--".to_string()
+                                    } else {
+                                        format!("{}ms", tool.duration_ms)
+                                    },
+                                ))
+                                .into_any_element()
+                        }))
+                        .children(
+                            StreamingMarkdownParser::parse_markdown(&message.content)
+                                .into_iter()
+                                .map(|block| self.render_markdown_block(block)),
+                        )
+                        .into_any_element(),
+                    dsh_core::MessageSender::System => div()
+                        .p_3()
+                        .rounded_md()
+                        .bg(rgb(0xf5f6f8))
+                        .text_xs()
+                        .text_color(rgb(0x61666b))
+                        .child(message.content.clone())
+                        .into_any_element(),
+                })
+                .collect()
+        };
         let diff_rows = self
             .pending_diffs
             .iter()
