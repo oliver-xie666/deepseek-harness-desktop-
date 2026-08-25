@@ -625,6 +625,24 @@ mod tests {
             "settings content must use GPUI's vertical scroll container"
         );
     }
+
+    #[test]
+    fn preset_copy_action_stops_parent_card_propagation() {
+        let source = include_str!("settings_modal.rs");
+        let expected = [
+            "cx.stop",
+            "_propagation();",
+            "copy_handler(event,window,cx);",
+        ]
+        .join("");
+        assert!(
+            source
+                .split_whitespace()
+                .collect::<String>()
+                .contains(&expected),
+            "copying a preset must not select its parent card"
+        );
+    }
 }
 
 fn page_heading(title: &str, description: &str) -> impl IntoElement {
@@ -742,6 +760,12 @@ fn preset_card(
     select_handler: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
     copy_handler: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
 ) -> impl IntoElement {
+    let handle_copy =
+        move |event: &gpui::MouseDownEvent, window: &mut Window, cx: &mut gpui::App| {
+            cx.stop_propagation();
+            copy_handler(event, window, cx);
+        };
+
     div()
         .flex()
         .items_center()
@@ -792,7 +816,7 @@ fn preset_card(
                 } else {
                     div().size(px(16.0)).into_any_element()
                 })
-                .child(action_button("复制", copy_handler)),
+                .child(action_button("复制", handle_copy)),
         )
 }
 
