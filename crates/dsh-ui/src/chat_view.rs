@@ -67,6 +67,33 @@ pub struct ChatView {
     _trace_search_subscription: Subscription,
 }
 
+#[cfg(test)]
+mod diff_notice_tests {
+    use super::record_diff_result;
+
+    #[test]
+    fn successful_diff_action_clears_previous_notice() {
+        let mut notice = Some("旧错误".to_string());
+        record_diff_result(&mut notice, None, "无法应用");
+        assert_eq!(notice, None);
+    }
+
+    #[test]
+    fn failed_diff_action_replaces_notice_with_action_context() {
+        let mut notice = None;
+        record_diff_result(
+            &mut notice,
+            Some("上下文不匹配".to_string()),
+            "无法拒绝变更",
+        );
+        assert_eq!(notice.as_deref(), Some("无法拒绝变更：上下文不匹配"));
+    }
+}
+
+fn record_diff_result(notice: &mut Option<String>, error: Option<String>, action: &str) {
+    *notice = error.map(|error| format!("{}：{}", action, error));
+}
+
 impl ChatView {
     pub fn new(
         state: Entity<Arc<AppState>>,
@@ -1387,15 +1414,16 @@ impl ChatView {
                     let file_path = file_path.clone();
                     cx.spawn(async move |this, cx| {
                         if let Some(session_id) = session_id {
-                            if let Err(error) =
-                                state.apply_diff(&session_id, &diff_id, &diff_content).await
-                            {
-                                this.update(cx, |view, cx| {
-                                    view.diff_notice =
-                                        Some(format!("无法应用 {}：{}", file_path, error));
-                                    cx.notify();
-                                })?;
-                            }
+                            let result =
+                                state.apply_diff(&session_id, &diff_id, &diff_content).await;
+                            this.update(cx, |view, cx| {
+                                record_diff_result(
+                                    &mut view.diff_notice,
+                                    result.err().map(|error| error.to_string()),
+                                    &format!("无法应用 {}", file_path),
+                                );
+                                cx.notify();
+                            })?;
                         }
                         Ok::<(), anyhow::Error>(())
                     })
@@ -1410,12 +1438,15 @@ impl ChatView {
                     let diff_id = diff_id.clone();
                     cx.spawn(async move |this, cx| {
                         if let Some(session_id) = session_id {
-                            if let Err(error) = state.reject_diff(&session_id, &diff_id).await {
-                                this.update(cx, |view, cx| {
-                                    view.diff_notice = Some(format!("无法拒绝变更：{}", error));
-                                    cx.notify();
-                                })?;
-                            }
+                            let result = state.reject_diff(&session_id, &diff_id).await;
+                            this.update(cx, |view, cx| {
+                                record_diff_result(
+                                    &mut view.diff_notice,
+                                    result.err().map(|error| error.to_string()),
+                                    "无法拒绝变更",
+                                );
+                                cx.notify();
+                            })?;
                         }
                         Ok::<(), anyhow::Error>(())
                     })
