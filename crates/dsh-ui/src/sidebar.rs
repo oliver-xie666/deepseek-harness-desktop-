@@ -181,6 +181,27 @@ impl Sidebar {
         cx.notify();
     }
 
+    fn pick_workspace(&mut self, cx: &mut Context<Self>) {
+        self.workspace_menu_open = false;
+        let paths_receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("添加工作区".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(result) = paths_receiver.await else {
+                return;
+            };
+            let Some(path) = workspace_from_prompt(result.ok()) else {
+                return;
+            };
+            let _ = this.update(cx, |sidebar, cx| sidebar.set_workspace(path, cx));
+        })
+        .detach();
+        cx.notify();
+    }
+
     fn set_workspace(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         let state = self.state.read(cx).clone();
         let label = path
@@ -195,6 +216,11 @@ impl Sidebar {
             state.set_workspace_path(path).await;
         });
         cx.notify();
+    }
+
+    fn restore_current_workspace(&mut self, cx: &mut Context<Self>) {
+        let path = self.state.read(cx).workspace_path.blocking_read().clone();
+        self.set_workspace(path, cx);
     }
 
     fn toggle_sort(&mut self, cx: &mut Context<Self>) {
@@ -760,6 +786,11 @@ fn workspace_menu(cx: &mut Context<Sidebar>) -> impl IntoElement {
         .flex()
         .flex_col()
         .child(menu_item(
+            "添加工作区...",
+            cx.listener(|this, _, _, cx| this.pick_workspace(cx)),
+        ))
+        .child(div().h(px(1.0)).my_1().bg(rgb(0xe5e7eb)))
+        .child(menu_item(
             ".",
             cx.listener(|this, _, _, cx| this.set_workspace(PathBuf::from("."), cx)),
         ))
@@ -770,6 +801,34 @@ fn workspace_menu(cx: &mut Context<Sidebar>) -> impl IntoElement {
         .child(div().h(px(1.0)).my_1().bg(rgb(0xe5e7eb)))
         .child(menu_item(
             "当前工作区",
-            cx.listener(|this, _, _, cx| this.set_workspace(PathBuf::from("."), cx)),
+            cx.listener(|this, _, _, cx| this.restore_current_workspace(cx)),
         ))
+}
+
+fn workspace_from_prompt(selection: Option<Option<Vec<PathBuf>>>) -> Option<PathBuf> {
+    selection
+        .flatten()
+        .and_then(|paths| paths.into_iter().next())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::workspace_from_prompt;
+    use std::path::PathBuf;
+
+    #[test]
+    fn workspace_picker_uses_first_selected_directory() {
+        let selected = workspace_from_prompt(Some(Some(vec![
+            PathBuf::from("D:/projects/alpha"),
+            PathBuf::from("D:/projects/beta"),
+        ])));
+        assert_eq!(selected, Some(PathBuf::from("D:/projects/alpha")));
+    }
+
+    #[test]
+    fn workspace_picker_ignores_cancelled_or_empty_selection() {
+        assert_eq!(workspace_from_prompt(None), None);
+        assert_eq!(workspace_from_prompt(Some(None)), None);
+        assert_eq!(workspace_from_prompt(Some(Some(Vec::new()))), None);
+    }
 }
