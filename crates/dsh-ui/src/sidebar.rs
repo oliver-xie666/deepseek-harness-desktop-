@@ -1,6 +1,7 @@
 use crate::icons;
 use crate::settings_modal::SettingsModal;
 use crate::text_input::TextInput;
+use chrono::{DateTime, Utc};
 use dsh_core::{AppState, FileNode, WorkspaceScanner};
 use gpui::{
     deferred, div, prelude::*, px, rgb, Context, Entity, FontWeight, IntoElement, MouseButton,
@@ -14,6 +15,7 @@ use std::time::Duration;
 pub struct SessionItemView {
     pub id: String,
     pub title: String,
+    pub updated_at: DateTime<Utc>,
     pub is_active: bool,
 }
 
@@ -25,6 +27,7 @@ pub struct Sidebar {
     active_workspace_path: PathBuf,
     expanded_paths: HashSet<PathBuf>,
     pub collapsed: bool,
+    pub explorer_collapsed: bool,
     search_open: bool,
     view_options_open: bool,
     workspace_menu_open: bool,
@@ -61,6 +64,7 @@ impl Sidebar {
             active_workspace_path: initial_workspace.clone(),
             expanded_paths: HashSet::from([initial_workspace.clone()]),
             collapsed: false,
+            explorer_collapsed: false,
             search_open: false,
             view_options_open: false,
             workspace_menu_open: false,
@@ -119,6 +123,7 @@ impl Sidebar {
                             .map(|session| SessionItemView {
                                 id: session.id.clone(),
                                 title: session.title.clone(),
+                                updated_at: session.updated_at,
                                 is_active: active_id.as_deref() == Some(session.id.as_str()),
                             })
                             .collect();
@@ -252,6 +257,11 @@ impl Sidebar {
         cx.notify();
     }
 
+    fn toggle_explorer_collapse(&mut self, cx: &mut Context<Self>) {
+        self.explorer_collapsed = !self.explorer_collapsed;
+        cx.notify();
+    }
+
     fn toggle_session_menu(&mut self, id: &str, cx: &mut Context<Self>) {
         if self.session_menu.as_deref() == Some(id) {
             self.session_menu = None;
@@ -326,6 +336,9 @@ impl Render for Sidebar {
         let handle_view = cx.listener(|this, _, _, cx| this.toggle_view_options(cx));
         let handle_workspace = cx.listener(|this, _, _, cx| this.toggle_workspace_menu(cx));
         let handle_sort = cx.listener(|this, _, _, cx| this.toggle_sort(cx));
+        let handle_toggle_explorer =
+            cx.listener(|this, _, _, cx| this.toggle_explorer_collapse(cx));
+        let now = chrono::Utc::now();
         let has_sessions = !self.sessions.is_empty();
         let collapsed = self.collapsed;
         let query = self.search_input.read(cx).text().trim().to_lowercase();
@@ -598,6 +611,8 @@ impl Render for Sidebar {
                                                     .into_any_element()
                                             };
 
+                                            let rel_time =
+                                                format_relative_time(sess.updated_at, now);
                                             div()
                                                 .relative()
                                                 .flex()
@@ -623,16 +638,32 @@ impl Render for Sidebar {
                                                     div()
                                                         .flex_1()
                                                         .min_w(px(0.0))
-                                                        .overflow_hidden()
-                                                        .text_xs()
-                                                        .text_color(fg)
-                                                        .text_ellipsis()
-                                                        .cursor_pointer()
-                                                        .on_mouse_down(
-                                                            MouseButton::Left,
-                                                            handle_click,
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_between()
+                                                        .gap_1()
+                                                        .child(
+                                                            div()
+                                                                .flex_1()
+                                                                .min_w(px(0.0))
+                                                                .overflow_hidden()
+                                                                .text_xs()
+                                                                .text_color(fg)
+                                                                .text_ellipsis()
+                                                                .cursor_pointer()
+                                                                .on_mouse_down(
+                                                                    MouseButton::Left,
+                                                                    handle_click,
+                                                                )
+                                                                .child(sess.title.clone()),
                                                         )
-                                                        .child(sess.title.clone())
+                                                        .child(
+                                                            div()
+                                                                .text_xs()
+                                                                .text_color(rgb(0x9ca3af))
+                                                                .flex_shrink_0()
+                                                                .child(rel_time),
+                                                        )
                                                         .into_any_element()
                                                 })
                                                 .child(action_button)
@@ -680,6 +711,8 @@ impl Render for Sidebar {
                                 .child(file_tree_panel(
                                     self.file_tree.as_ref(),
                                     &self.expanded_paths,
+                                    self.explorer_collapsed,
+                                    handle_toggle_explorer,
                                     cx,
                                 )),
                         )
@@ -741,11 +774,37 @@ fn menu_item(
         .child(label)
 }
 
+pub fn format_relative_time(
+    then: chrono::DateTime<chrono::Utc>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> String {
+    let diff = now.signed_duration_since(then);
+    if diff.num_seconds() < 60 {
+        "刚刚".to_string()
+    } else if diff.num_minutes() < 60 {
+        format!("{}分钟前", diff.num_minutes())
+    } else if diff.num_hours() < 24 {
+        format!("{}小时前", diff.num_hours())
+    } else if diff.num_days() == 1 {
+        "昨天".to_string()
+    } else if diff.num_days() < 30 {
+        format!("{}天前", diff.num_days())
+    } else {
+        then.format("%m-%d").to_string()
+    }
+}
+
 fn file_tree_panel(
     tree: Option<&FileNode>,
     expanded_paths: &HashSet<PathBuf>,
+    collapsed: bool,
+    handle_toggle_collapse: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
     cx: &mut Context<Sidebar>,
 ) -> impl IntoElement {
+    let handle_refresh = cx.listener(|this, _, _, cx| {
+        this.refresh_tree(cx);
+    });
+
     div()
         .mt_2()
         .pt_2()
@@ -762,28 +821,42 @@ fn file_tree_panel(
                 .px_1()
                 .child(
                     div()
-                        .text_xs()
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(rgb(0x61666b))
-                        .child("Explorer"),
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .cursor_pointer()
+                        .on_mouse_down(MouseButton::Left, handle_toggle_collapse)
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(rgb(0x81858c))
+                                .child(if collapsed { "▸" } else { "▾" }),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(rgb(0x61666b))
+                                .child("Explorer"),
+                        ),
                 )
-                .child({
-                    let handle_refresh = cx.listener(|this, _, _, cx| {
-                        this.refresh_tree(cx);
-                    });
-                    sidebar_icon_btn(icons::refresh(12.0, rgb(0x81858c)), handle_refresh)
-                }),
+                .child(sidebar_icon_btn(
+                    icons::refresh(12.0, rgb(0x81858c)),
+                    handle_refresh,
+                )),
         )
-        .child(if let Some(tree) = tree {
-            file_tree_node(tree, 0, expanded_paths, cx).into_any_element()
-        } else {
-            div()
-                .px_1()
-                .py_1()
-                .text_xs()
-                .text_color(rgb(0x81858c))
-                .child("无法读取工作区")
-                .into_any_element()
+        .when(!collapsed, |this| {
+            this.child(if let Some(tree) = tree {
+                file_tree_node(tree, 0, expanded_paths, cx).into_any_element()
+            } else {
+                div()
+                    .px_1()
+                    .py_1()
+                    .text_xs()
+                    .text_color(rgb(0x81858c))
+                    .child("无法读取工作区")
+                    .into_any_element()
+            })
         })
 }
 
@@ -889,9 +962,33 @@ fn workspace_from_prompt(selection: Option<Option<Vec<PathBuf>>>) -> Option<Path
 
 #[cfg(test)]
 mod tests {
-    use super::{toggle_tree_path, workspace_from_prompt};
+    use super::{format_relative_time, toggle_tree_path, workspace_from_prompt};
+    use chrono::{Duration, Utc};
     use std::collections::HashSet;
     use std::path::PathBuf;
+
+    #[test]
+    fn test_format_relative_time() {
+        let now = Utc::now();
+        assert_eq!(
+            format_relative_time(now - Duration::seconds(10), now),
+            "刚刚"
+        );
+        assert_eq!(
+            format_relative_time(now - Duration::minutes(5), now),
+            "5分钟前"
+        );
+        assert_eq!(
+            format_relative_time(now - Duration::hours(3), now),
+            "3小时前"
+        );
+        assert_eq!(format_relative_time(now - Duration::days(1), now), "昨天");
+        assert_eq!(format_relative_time(now - Duration::days(4), now), "4天前");
+        assert_eq!(
+            format_relative_time(now - Duration::days(60), now),
+            (now - Duration::days(60)).format("%m-%d").to_string()
+        );
+    }
 
     #[test]
     fn workspace_picker_uses_first_selected_directory() {

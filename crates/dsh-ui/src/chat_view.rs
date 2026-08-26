@@ -48,6 +48,11 @@ pub struct ChatView {
     pub active_turns: usize,
     pub active_steps: usize,
     pub active_tool_ms: u64,
+    pub active_llm_ms: u64,
+    pub active_ttft_ms: u64,
+    pub active_input_tokens: usize,
+    pub active_output_tokens: usize,
+    pub active_cache_hit: Option<u8>,
     pub streaming_text: String,
     pub permission_open: bool,
     pub model_open: bool,
@@ -170,6 +175,11 @@ impl ChatView {
             active_turns: 0,
             active_steps: 0,
             active_tool_ms: 0,
+            active_llm_ms: 0,
+            active_ttft_ms: 0,
+            active_input_tokens: 0,
+            active_output_tokens: 0,
+            active_cache_hit: None,
             streaming_text: String::new(),
             permission_open: false,
             model_open: false,
@@ -450,6 +460,11 @@ impl ChatView {
         self.active_turns = 0;
         self.active_steps = 0;
         self.active_tool_ms = 0;
+        self.active_llm_ms = 0;
+        self.active_ttft_ms = 0;
+        self.active_input_tokens = 0;
+        self.active_output_tokens = 0;
+        self.active_cache_hit = None;
         self.streaming_text.clear();
         self.text_input.update(cx, |input, cx| {
             input.clear(cx);
@@ -1184,14 +1199,22 @@ impl ChatView {
     }
 
     fn render_stats_line(&self) -> impl IntoElement {
-        let turns = self.active_turns.max(1);
-        let steps = self.active_steps.max(turns);
-        let summary = format!("{} 轮 · {} 步", turns, steps);
-        let tool_summary = if self.active_tool_ms > 0 {
-            format!("工具调用 {}ms", self.active_tool_ms)
-        } else {
-            "工具调用 --".to_string()
-        };
+        let line = format_stats_line(
+            self.active_turns,
+            self.active_steps,
+            self.active_llm_ms,
+            self.active_tool_ms,
+            self.active_ttft_ms,
+            self.active_output_tokens,
+            self.active_llm_ms,
+            self.active_cache_hit,
+            self.active_input_tokens,
+            self.active_output_tokens,
+        );
+
+        if line.is_empty() {
+            return div().into_any_element();
+        }
 
         div()
             .max_w(px(776.0))
@@ -1200,10 +1223,8 @@ impl ChatView {
             .px_2()
             .text_xs()
             .text_color(rgb(0x81858c))
-            .child(format!(
-                "{} | LLM -- · {} | 首 token -- · -- tok/s | 缓存命中 -- | 输入 -- tok · 输出 -- tok",
-                summary, tool_summary
-            ))
+            .child(line)
+            .into_any_element()
     }
 
     fn render_trace(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1828,4 +1849,114 @@ fn menu_choice(
         } else {
             div().size(px(14.0)).into_any_element()
         })
+}
+
+pub fn format_duration_metric(ms: u64) -> String {
+    if ms >= 1000 {
+        format!("{:.1}s", ms as f64 / 1000.0)
+    } else {
+        format!("{ms}ms")
+    }
+}
+
+pub fn format_token_count(tokens: usize) -> String {
+    if tokens >= 1000 {
+        format!("{:.1}k", tokens as f64 / 1000.0)
+    } else {
+        format!("{tokens}")
+    }
+}
+
+pub fn format_stats_line(
+    turns: usize,
+    steps: usize,
+    llm_ms: u64,
+    tool_ms: u64,
+    ttft_ms: u64,
+    decode_tokens: usize,
+    decode_ms: u64,
+    cache_hit_percent: Option<u8>,
+    input_tokens: usize,
+    output_tokens: usize,
+) -> String {
+    if steps == 0 {
+        return String::new();
+    }
+
+    let mut groups = Vec::new();
+
+    // 1. 轮/步
+    groups.push(format!("{} 轮 · {} 步", turns.max(1), steps.max(1)));
+
+    // 2. 耗时
+    let mut durations = Vec::new();
+    if llm_ms > 0 {
+        durations.push(format!("LLM {}", format_duration_metric(llm_ms)));
+    }
+    if tool_ms > 0 {
+        durations.push(format!("工具调用 {}", format_duration_metric(tool_ms)));
+    }
+    if !durations.is_empty() {
+        groups.push(durations.join(" · "));
+    }
+
+    // 3. 速率
+    let mut speeds = Vec::new();
+    if ttft_ms > 0 {
+        speeds.push(format!("首 token 平均 {}", format_duration_metric(ttft_ms)));
+    }
+    if decode_tokens > 0 && decode_ms > 0 {
+        let tps = (decode_tokens as f64) / (decode_ms as f64 / 1000.0);
+        speeds.push(format!("{:.1} token/s", tps));
+    }
+    if !speeds.is_empty() {
+        groups.push(speeds.join(" · "));
+    }
+
+    // 4. 缓存命中 & Token用量
+    if let Some(percent) = cache_hit_percent {
+        groups.push(format!("缓存命中 {}%", percent));
+    }
+    if input_tokens > 0 || output_tokens > 0 {
+        groups.push(format!(
+            "输入 {} · 输出 {}",
+            format_token_count(input_tokens),
+            format_token_count(output_tokens)
+        ));
+    }
+
+    groups.join(" | ")
+}
+
+#[cfg(test)]
+pub mod stats_tests {
+    use super::*;
+
+    #[test]
+    fn test_format_duration_metric() {
+        assert_eq!(format_duration_metric(450), "450ms");
+        assert_eq!(format_duration_metric(1200), "1.2s");
+        assert_eq!(format_duration_metric(3000), "3.0s");
+    }
+
+    #[test]
+    fn test_format_token_count() {
+        assert_eq!(format_token_count(350), "350");
+        assert_eq!(format_token_count(1500), "1.5k");
+        assert_eq!(format_token_count(10000), "10.0k");
+    }
+
+    #[test]
+    fn test_format_stats_line_empty_when_zero_steps() {
+        assert_eq!(format_stats_line(0, 0, 0, 0, 0, 0, 0, None, 0, 0), "");
+    }
+
+    #[test]
+    fn test_format_stats_line_full_metrics() {
+        let line = format_stats_line(1, 3, 1500, 450, 320, 100, 2000, Some(95), 1200, 450);
+        assert_eq!(
+            line,
+            "1 轮 · 3 步 | LLM 1.5s · 工具调用 450ms | 首 token 平均 320ms · 50.0 token/s | 缓存命中 95% | 输入 1.2k · 输出 450"
+        );
+    }
 }

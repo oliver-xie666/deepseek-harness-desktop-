@@ -2,7 +2,7 @@
 
 **更新时间：** 2026-08-26
 
-**基线：** `main` / `origin/main` 的 `6ace852`（`merge: refine model catalog, diff applier, and vector icons`）
+**基线：** `main` / `origin/main` 的最新提交（`8991bd7` / `feat/ui-parity-polish`）
 **工作树：** 干净；`.reasonix/` 与 `.superpowers/` 均为本机生成的忽略目录。
 
 本文件记录桌面端应用与官方 Harness（本地 3080 端口）逐项视觉与交互对照、已完成的功能项、修复差距以及后续维护规范。
@@ -12,14 +12,17 @@
 ### 状态、会话与工作区
 
 - **会话持久化与状态管理**：`AppState` 为唯一事实来源；会话可新建、选择、重命名、复制、删除，通过稳定 ID 定位；删除当前会话平滑切换后继会话。
+- **存储路径隔离与测试套件**：`AppState` 支持 `new_with_storage` 自定义数据目录与 `DSH_DATA_DIR` 环境变量覆盖，单元测试全面接入隔离临时目录，杜绝文件权限污染。
+- **会话相对时间徽标**：侧栏会话项基于 `session.updated_at` 实时渲染相对时间标记（`刚刚`、`X分钟前`、`X小时前`、`昨天`、`X天前` 或 `%m-%d`），长标题支持平滑省略。
 - **工作区切换与原生目录选择器**：侧栏“添加工作区...”接入 `rfd::FileDialog` 原生目录选择器，取消或空选安全回退；切换工作区同步更新窗口标题、会话上下文与文件树。
-- **可展开折叠的 Explorer 文件树**：支持多层目录递归扫描、展开/折叠状态管理，并提供刷新按钮；文件项可交给系统默认程序打开。
+- **可展开折叠的 Explorer 文件树**：支持多层目录递归扫描、展开/折叠状态管理，并提供一键刷新与 Explorer 面板折叠展开（`▸` / `▾`）；文件项可交给系统默认程序打开。
 - **侧栏检索与视图排序**：支持会话名称过滤搜索以及“按最近使用”与“按名称”排序切换。
 
 ### 对话、轨迹、消息操作与工具状态
 
 - **对话与轨迹双重视图**：顶部“对话 / 轨迹”自由切换，轨迹视图真实展示工具调用入参、输出与执行耗时；详情抽屉支持参数和输出的一键复制。
 - **消息交互与代码块操作**：Assistant 消息底部提供操作条（复制、点赞、点踩、重试/Fork 按钮），支持消息内容与代码块独立一键复制到剪贴板，带有悬浮效果。
+- **输入框底部运行时统计栏（Stats Line）**：完全对齐官方 Harness 统计栏，动态格式化输出 `X 轮 · Y 步 | LLM ... · 工具调用 ... | 首 token 平均 ... · ... token/s | 缓存命中 ...% | 输入 ... · 输出 ...`，0 步骤时平滑回退，包含完整单元测试。
 - **工具调用状态细化**：按协议真实 `ToolStatus` 细分“运行中（Running）”、“成功（Success）”与“失败（Error）”状态并渲染对应状态徽标与色彩。
 - **全量可滚动 Session 日志**：支持展开查看全量终端与执行事件日志，支持日志内容复制与导出。
 - **输入区域与命令菜单**：支持文本换行与快捷键提交；支持快速切换权限模式（Full access / Workspace write / Read-only / Ask）、Agent 预设与命令菜单。
@@ -47,7 +50,7 @@
 ### 工程交付
 
 - **Windows 独立打包**：`scripts/package_windows.ps1` 可构建并打包包含可执行程序及完整 `assets/` 矢量资源目录的 `DeepSeek-Harness-Desktop-Windows-x64.zip`。
-- **代码质量与测试**：全 workspace 单元测试 35 项全部通过（`cargo test --workspace`），`cargo fmt` 格式化通过，`cargo check -p dsh-ui` 零警告零报错。
+- **代码质量与测试**：全 workspace 单元测试 40 项全部通过（`cargo test --workspace`），`cargo fmt` 格式化通过，`cargo check -p dsh-ui` 零警告零报错。
 
 ## 关键实现入口
 
@@ -55,10 +58,10 @@
 | --- | --- |
 | 会话、持久化、服务端事件、diff 操作 | `crates/dsh-core/src/lib.rs` |
 | unified diff 解析、新建/删除与原子写入 | `crates/dsh-core/src/diff_applier.rs` |
-| 主对话、轨迹、消息操作、代码块复制、会话日志 | `crates/dsh-ui/src/chat_view.rs` |
+| 主对话、轨迹、消息操作、代码块复制、底栏统计、会话日志 | `crates/dsh-ui/src/chat_view.rs` |
 | 模型目录与提供方分组 | `crates/dsh-ui/src/model_catalog.rs` |
 | 设置模态框、主题选择、预设 2x2 网格、插件管理 | `crates/dsh-ui/src/settings_modal.rs` |
-| 侧栏、工作区树、搜索排序与会话菜单 | `crates/dsh-ui/src/sidebar.rs`、`crates/dsh-ui/src/dropdown.rs` |
+| 侧栏、工作区树、搜索排序、相对时间与会话菜单 | `crates/dsh-ui/src/sidebar.rs`、`crates/dsh-ui/src/dropdown.rs` |
 | 矢量图标体系 | `crates/dsh-ui/src/icons.rs`、`crates/dsh-ui/assets/` |
 | 标题和工作区同步 | `crates/dsh-ui/src/title_bar.rs`、`crates/dsh-ui/src/workspace.rs` |
 | Windows 打包脚本 | `scripts/package_windows.ps1` |

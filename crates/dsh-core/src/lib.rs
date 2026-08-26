@@ -78,6 +78,7 @@ fn default_session_time() -> DateTime<Utc> {
 
 pub struct AppState {
     pub workspace_path: RwLock<PathBuf>,
+    pub storage_dir: PathBuf,
     pub active_session_id: RwLock<Option<String>>,
     pub sessions: RwLock<HashMap<String, Session>>,
     pub daemon_manager: Arc<DaemonManager>,
@@ -88,14 +89,21 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(daemon_config: DaemonConfig) -> (Arc<Self>, mpsc::Receiver<HarnessClientMessage>) {
+        Self::new_with_storage(daemon_config, AppPaths::data_dir())
+    }
+
+    pub fn new_with_storage(
+        daemon_config: DaemonConfig,
+        storage_dir: PathBuf,
+    ) -> (Arc<Self>, mpsc::Receiver<HarnessClientMessage>) {
         let (outbox_tx, outbox_rx) = mpsc::channel(100);
         let daemon_manager = Arc::new(DaemonManager::new(daemon_config));
-        let data_dir = AppPaths::data_dir();
-        let config = AppConfig::load_or_default(&data_dir);
-        let mcp_servers = McpRegistry::load_servers(&data_dir);
+        let config = AppConfig::load_or_default(&storage_dir);
+        let mcp_servers = McpRegistry::load_servers(&storage_dir);
 
         let state = Arc::new(Self {
             workspace_path: RwLock::new(PathBuf::from(".")),
+            storage_dir,
             active_session_id: RwLock::new(None),
             sessions: RwLock::new(HashMap::new()),
             daemon_manager,
@@ -176,7 +184,7 @@ impl AppState {
         };
         updated.title = title.to_string();
         updated.updated_at = Utc::now();
-        SessionPersistence::save_session(&AppPaths::data_dir(), &updated)?;
+        SessionPersistence::save_session(&self.storage_dir, &updated)?;
         self.sessions
             .write()
             .await
@@ -195,7 +203,7 @@ impl AppState {
         duplicate.created_at = now;
         duplicate.updated_at = now;
         let duplicate_id = duplicate.id.clone();
-        SessionPersistence::save_session(&AppPaths::data_dir(), &duplicate)?;
+        SessionPersistence::save_session(&self.storage_dir, &duplicate)?;
         self.sessions
             .write()
             .await
@@ -209,7 +217,7 @@ impl AppState {
             return Ok(false);
         }
 
-        SessionPersistence::delete_session(&AppPaths::data_dir(), session_id)?;
+        SessionPersistence::delete_session(&self.storage_dir, session_id)?;
         let mut sessions = self.sessions.write().await;
         sessions.remove(session_id);
         let next_active = sessions
@@ -441,7 +449,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_app_state_session() {
-        let (state, _) = AppState::new(DaemonConfig::default());
+        let temp_dir =
+            std::env::temp_dir().join(format!("dsh_test_session_{}", uuid::Uuid::new_v4()));
+        let (state, _) = AppState::new_with_storage(DaemonConfig::default(), temp_dir.clone());
         let session_id = state.create_session("Test Session", "/tmp").await;
         assert_eq!(
             *state.active_session_id.read().await,
@@ -460,11 +470,14 @@ mod tests {
         let session = sessions.get(&session_id).unwrap();
         assert_eq!(session.messages.len(), 1);
         assert_eq!(session.messages[0].content, "Hello");
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 
     #[tokio::test]
     async fn session_lifecycle_uses_ids_and_updates_active_session() {
-        let (state, _) = AppState::new(DaemonConfig::default());
+        let temp_dir =
+            std::env::temp_dir().join(format!("dsh_test_lifecycle_{}", uuid::Uuid::new_v4()));
+        let (state, _) = AppState::new_with_storage(DaemonConfig::default(), temp_dir.clone());
         let first = state.create_session("相同标题", "/tmp/a").await;
         let second = state.create_session("相同标题", "/tmp/b").await;
 
@@ -473,6 +486,7 @@ mod tests {
         assert_ne!(copy, first);
         assert!(state.delete_session(&second).await.unwrap());
         assert_eq!(*state.active_session_id.read().await, Some(copy));
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 
     #[tokio::test]
