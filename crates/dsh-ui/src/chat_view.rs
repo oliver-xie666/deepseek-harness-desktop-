@@ -13,7 +13,7 @@ use gpui::{
     deferred, div, prelude::*, px, rgb, rgba, Context, Entity, FontWeight, IntoElement,
     MouseButton, ScrollHandle, Subscription, Window,
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -21,6 +21,12 @@ use std::time::Duration;
 enum SessionView {
     Chat,
     Trace,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MessageFeedback {
+    ThumbsUp,
+    ThumbsDown,
 }
 
 #[derive(Clone)]
@@ -79,6 +85,9 @@ pub struct ChatView {
     pub trace_all_collapsed: bool,
     pub trace_collapsed_turns: HashSet<usize>,
     trace_entries: Vec<TraceEntry>,
+    pub message_feedbacks: HashMap<String, MessageFeedback>,
+    pub copied_msg_id: Option<String>,
+    pub copied_code_snippet: Option<String>,
     session_log_lines: Vec<String>,
     session_log_scroll_handle: ScrollHandle,
     trace_search_input: Entity<TextInput>,
@@ -253,6 +262,9 @@ impl ChatView {
             trace_all_collapsed: false,
             trace_collapsed_turns: HashSet::new(),
             trace_entries: Vec::new(),
+            message_feedbacks: HashMap::new(),
+            copied_msg_id: None,
+            copied_code_snippet: None,
             session_log_lines: Vec::new(),
             session_log_scroll_handle: ScrollHandle::new(),
             trace_search_input: trace_search_input.clone(),
@@ -2489,9 +2501,41 @@ impl ChatView {
                                 .map(|block| self.render_markdown_block(block, cx)),
                         )
                         .child({
+                            let is_copied = self.copied_msg_id.as_deref() == Some(&message.id);
+                            let feedback = self.message_feedbacks.get(&message.id).copied();
+
+                            let msg_id_up = message.id.clone();
+                            let handle_thumbs_up = cx.listener(move |this, _, _, cx| {
+                                if this.message_feedbacks.get(&msg_id_up)
+                                    == Some(&MessageFeedback::ThumbsUp)
+                                {
+                                    this.message_feedbacks.remove(&msg_id_up);
+                                } else {
+                                    this.message_feedbacks
+                                        .insert(msg_id_up.clone(), MessageFeedback::ThumbsUp);
+                                }
+                                cx.notify();
+                            });
+
+                            let msg_id_down = message.id.clone();
+                            let handle_thumbs_down = cx.listener(move |this, _, _, cx| {
+                                if this.message_feedbacks.get(&msg_id_down)
+                                    == Some(&MessageFeedback::ThumbsDown)
+                                {
+                                    this.message_feedbacks.remove(&msg_id_down);
+                                } else {
+                                    this.message_feedbacks
+                                        .insert(msg_id_down.clone(), MessageFeedback::ThumbsDown);
+                                }
+                                cx.notify();
+                            });
+
+                            let msg_id_copy = message.id.clone();
                             let message_content = message.content.clone();
-                            let handle_copy_msg = cx.listener(move |_this, _, _, cx| {
+                            let handle_copy_msg = cx.listener(move |this, _, _, cx| {
                                 cx.write_to_clipboard(message_content.clone().into());
+                                this.copied_msg_id = Some(msg_id_copy.clone());
+                                cx.notify();
                             });
                             div()
                                 .flex()
@@ -2505,10 +2549,15 @@ impl ChatView {
                                         .items_center()
                                         .justify_center()
                                         .rounded(px(6.0))
-                                        .hover(|s| s.bg(rgb(0xf1f3f5)))
                                         .cursor_pointer()
                                         .on_mouse_down(gpui::MouseButton::Left, handle_copy_msg)
-                                        .child(icons::copy(13.0, rgb(0x81858c))),
+                                        .when(is_copied, |s| s.bg(rgb(0xdcfce7)))
+                                        .when(!is_copied, |s| s.hover(|s| s.bg(rgb(0xf1f3f5))))
+                                        .child(if is_copied {
+                                            icons::check(13.0, rgb(0x16a34a)).into_any_element()
+                                        } else {
+                                            icons::copy(13.0, rgb(0x81858c)).into_any_element()
+                                        }),
                                 )
                                 .child(
                                     div()
@@ -2517,9 +2566,24 @@ impl ChatView {
                                         .items_center()
                                         .justify_center()
                                         .rounded(px(6.0))
-                                        .hover(|s| s.bg(rgb(0xf1f3f5)))
                                         .cursor_pointer()
-                                        .child(icons::thumbs_up(13.0, rgb(0x81858c))),
+                                        .on_mouse_down(gpui::MouseButton::Left, handle_thumbs_up)
+                                        .when(feedback == Some(MessageFeedback::ThumbsUp), |s| {
+                                            s.bg(rgb(0xdbeafe))
+                                                .border_1()
+                                                .border_color(rgb(0x93c5fd))
+                                        })
+                                        .when(feedback != Some(MessageFeedback::ThumbsUp), |s| {
+                                            s.hover(|s| s.bg(rgb(0xf1f3f5)))
+                                        })
+                                        .child(icons::thumbs_up(
+                                            13.0,
+                                            if feedback == Some(MessageFeedback::ThumbsUp) {
+                                                rgb(0x2563eb)
+                                            } else {
+                                                rgb(0x81858c)
+                                            },
+                                        )),
                                 )
                                 .child(
                                     div()
@@ -2528,9 +2592,24 @@ impl ChatView {
                                         .items_center()
                                         .justify_center()
                                         .rounded(px(6.0))
-                                        .hover(|s| s.bg(rgb(0xf1f3f5)))
                                         .cursor_pointer()
-                                        .child(icons::thumbs_down(13.0, rgb(0x81858c))),
+                                        .on_mouse_down(gpui::MouseButton::Left, handle_thumbs_down)
+                                        .when(feedback == Some(MessageFeedback::ThumbsDown), |s| {
+                                            s.bg(rgb(0xfee2e2))
+                                                .border_1()
+                                                .border_color(rgb(0xfca5a5))
+                                        })
+                                        .when(feedback != Some(MessageFeedback::ThumbsDown), |s| {
+                                            s.hover(|s| s.bg(rgb(0xf1f3f5)))
+                                        })
+                                        .child(icons::thumbs_down(
+                                            13.0,
+                                            if feedback == Some(MessageFeedback::ThumbsDown) {
+                                                rgb(0xdc2626)
+                                            } else {
+                                                rgb(0x81858c)
+                                            },
+                                        )),
                                 )
                                 .child(
                                     div()
@@ -3023,5 +3102,57 @@ mod goal_and_jobs_ui_tests {
         );
         assert_eq!(job_status_label(dsh_protocol::JobStatus::Killed), "已终止");
         assert_eq!(job_status_label(dsh_protocol::JobStatus::Failed), "失败");
+    }
+}
+
+#[cfg(test)]
+mod feedback_and_trace_tests {
+    use super::*;
+
+    #[test]
+    fn test_message_feedback_toggle() {
+        let mut feedbacks: HashMap<String, MessageFeedback> = HashMap::new();
+        let msg_id = "msg-123".to_string();
+
+        feedbacks.insert(msg_id.clone(), MessageFeedback::ThumbsUp);
+        assert_eq!(feedbacks.get(&msg_id), Some(&MessageFeedback::ThumbsUp));
+
+        feedbacks.insert(msg_id.clone(), MessageFeedback::ThumbsDown);
+        assert_eq!(feedbacks.get(&msg_id), Some(&MessageFeedback::ThumbsDown));
+
+        feedbacks.remove(&msg_id);
+        assert_eq!(feedbacks.get(&msg_id), None);
+    }
+
+    #[test]
+    fn test_trace_entry_search_matching() {
+        let entry = TraceEntry {
+            turn: 1,
+            kind: "TOOL",
+            title: "read_file".to_string(),
+            detail: "Reading config.json".to_string(),
+            args: r#"{"path": "config.json"}"#.to_string(),
+            output: r#"{"status": "ok"}"#.to_string(),
+            duration_ms: 45,
+            tool_status: Some(ToolStatus::Success),
+        };
+
+        let matches = |e: &TraceEntry, q: &str| -> bool {
+            if q.is_empty() {
+                return true;
+            }
+            let q = q.to_lowercase();
+            e.kind.to_lowercase().contains(&q)
+                || e.title.to_lowercase().contains(&q)
+                || e.detail.to_lowercase().contains(&q)
+                || e.args.to_lowercase().contains(&q)
+                || e.output.to_lowercase().contains(&q)
+        };
+
+        assert!(matches(&entry, "read_file"));
+        assert!(matches(&entry, "config.json"));
+        assert!(matches(&entry, "status"));
+        assert!(matches(&entry, "TOOL"));
+        assert!(!matches(&entry, "write_file"));
     }
 }

@@ -1,12 +1,99 @@
 use crate::icons;
 use crate::model_catalog::model_options;
 use dsh_common::AppPaths;
-use dsh_core::{AppConfig, AppState, McpServerConfig, McpTransport};
+use dsh_core::{AppConfig, AppState, McpServerConfig};
 use gpui::{
     div, prelude::*, px, rgb, Context, Entity, FontWeight, IntoElement, MouseButton, ScrollHandle,
     Window,
 };
 use std::sync::Arc;
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum PluginSubTab {
+    Config,
+    Inventory,
+}
+
+pub struct PluginInfo {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub version: &'static str,
+    pub category: &'static str,
+    pub description: &'static str,
+}
+
+pub const INSTALLED_PLUGINS: &[PluginInfo] = &[
+    PluginInfo {
+        id: "@deepseek-ai/dsh-client-ui-sidebar",
+        name: "侧边栏与会话管理",
+        version: "v0.1.0",
+        category: "核心组件",
+        description: "提供多会话历史记录切换、相对时间徽标、快速检索及工作区管理。",
+    },
+    PluginInfo {
+        id: "@deepseek-ai/dsh-client-ui-jobs",
+        name: "后台任务与 Subagent",
+        version: "v0.1.0",
+        category: "任务系统",
+        description: "提供长生命周期 Subagent 后台运行状态指示、任务列表展开与终止控制。",
+    },
+    PluginInfo {
+        id: "@deepseek-ai/dsh-client-ui-goal",
+        name: "目标导航与进度状态",
+        version: "v0.1.0",
+        category: "会话控制",
+        description: "在输入框顶部锚定会话目标栏，支持行内快速编辑、阶段切换与完成状态标记。",
+    },
+    PluginInfo {
+        id: "@deepseek-ai/dsh-client-ui-plan",
+        name: "Plan 模式与计划审查",
+        version: "v0.1.0",
+        category: "规划引擎",
+        description: "支持在复杂任务下进入分步规划模式，提供 Markdown 计划审查卡片与一键批准。",
+    },
+    PluginInfo {
+        id: "@deepseek-ai/dsh-client-ui-user-questions",
+        name: "交互式方案选择卡片",
+        version: "v0.1.0",
+        category: "交互决策",
+        description: "支持服务端下发多选/单选方案卡片，直接在对话流中点选确认决策。",
+    },
+    PluginInfo {
+        id: "@deepseek-ai/dsh-session-log-export",
+        name: "会话记录与日志导出",
+        version: "v0.1.0",
+        category: "导出工具",
+        description: "支持将全量对话、工具执行轨迹及终端日志导出为 Markdown 与 JSON 文件。",
+    },
+    PluginInfo {
+        id: "@liustack/modlens",
+        name: "视觉引擎与图片粘贴摄取",
+        version: "v0.1.0",
+        category: "多模态扩展",
+        description: "支持剪贴板截图直接粘贴转为本地文件路径与附件列表关联。",
+    },
+    PluginInfo {
+        id: "dsh-better-sidebar",
+        name: "高级侧栏与面板增强",
+        version: "v0.1.0",
+        category: "界面增强",
+        description: "提供侧栏默认展开、自动任务弹窗、辅助侧栏卡片管理等个性化配置。",
+    },
+    PluginInfo {
+        id: "@deepseek-ai/dsh-client-ui-trajectory",
+        name: "轨迹与执行细节抽屉",
+        version: "v0.1.0",
+        category: "执行监控",
+        description: "提供工具调用入参、输出结构化展示与耗时审计抽屉。",
+    },
+    PluginInfo {
+        id: "@deepseek-ai/dsh-client-ui-message-feedback",
+        name: "消息操作与交互反馈",
+        version: "v0.1.0",
+        category: "交互组件",
+        description: "提供 Assistant 消息点赞、点踩、独立代码块复制及复制状态提示。",
+    },
+];
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum SettingsTab {
@@ -24,6 +111,12 @@ pub struct SettingsModal {
     pub mcp_servers: Vec<McpServerConfig>,
     pub model_editing: bool,
     pub modlens_open: bool,
+    pub plugin_subtab: PluginSubTab,
+    pub sidebar_open_by_default: bool,
+    pub auto_open_jobs: bool,
+    pub show_workspace_tree: bool,
+    pub show_terminal_logs: bool,
+    pub disabled_plugins: std::collections::HashSet<String>,
     state: Entity<Arc<AppState>>,
     content_scroll_handle: ScrollHandle,
 }
@@ -49,6 +142,12 @@ impl SettingsModal {
             mcp_servers,
             model_editing: false,
             modlens_open: false,
+            plugin_subtab: PluginSubTab::Config,
+            sidebar_open_by_default: true,
+            auto_open_jobs: true,
+            show_workspace_tree: true,
+            show_terminal_logs: true,
+            disabled_plugins: std::collections::HashSet::new(),
             state,
             content_scroll_handle: ScrollHandle::new(),
         }
@@ -64,6 +163,40 @@ impl SettingsModal {
 
     pub fn set_tab(&mut self, tab: SettingsTab, cx: &mut Context<Self>) {
         self.active_tab = tab;
+        cx.notify();
+    }
+
+    pub fn set_plugin_subtab(&mut self, subtab: PluginSubTab, cx: &mut Context<Self>) {
+        self.plugin_subtab = subtab;
+        cx.notify();
+    }
+
+    pub fn toggle_plugin_enabled(&mut self, plugin_id: &str, cx: &mut Context<Self>) {
+        if self.disabled_plugins.contains(plugin_id) {
+            self.disabled_plugins.remove(plugin_id);
+        } else {
+            self.disabled_plugins.insert(plugin_id.to_string());
+        }
+        cx.notify();
+    }
+
+    pub fn toggle_sidebar_open_pref(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_open_by_default = !self.sidebar_open_by_default;
+        cx.notify();
+    }
+
+    pub fn toggle_auto_jobs_pref(&mut self, cx: &mut Context<Self>) {
+        self.auto_open_jobs = !self.auto_open_jobs;
+        cx.notify();
+    }
+
+    pub fn toggle_workspace_tree_pref(&mut self, cx: &mut Context<Self>) {
+        self.show_workspace_tree = !self.show_workspace_tree;
+        cx.notify();
+    }
+
+    pub fn toggle_terminal_logs_pref(&mut self, cx: &mut Context<Self>) {
+        self.show_terminal_logs = !self.show_terminal_logs;
         cx.notify();
     }
 
@@ -661,6 +794,14 @@ impl SettingsModal {
     }
 
     fn plugins_body(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let is_inventory = self.plugin_subtab == PluginSubTab::Inventory;
+        let handle_config_tab = cx.listener(|this, _, _, cx| {
+            this.set_plugin_subtab(PluginSubTab::Config, cx);
+        });
+        let handle_inventory_tab = cx.listener(|this, _, _, cx| {
+            this.set_plugin_subtab(PluginSubTab::Inventory, cx);
+        });
+
         let builtin_plugins = [
             ("终端", "限制 agent 运行的每一条命令。"),
             ("Agent 循环", "Agent 如何派发工具调用。"),
@@ -672,7 +813,7 @@ impl SettingsModal {
             .flex()
             .flex_col()
             .gap_4()
-            .child(page_heading("插件", "配置和查看本部署已安装的插件。"))
+            .child(page_heading("插件", "配置和查看本部署已安装的插件与组件。"))
             .child(
                 div()
                     .flex()
@@ -685,118 +826,289 @@ impl SettingsModal {
                         div()
                             .text_xs()
                             .font_weight(FontWeight::MEDIUM)
-                            .text_color(rgb(0x0f1115))
+                            .text_color(if !is_inventory { rgb(0x0f1115) } else { rgb(0x81858c) })
                             .border_b_2()
-                            .border_color(rgb(0x0f1115))
+                            .border_color(if !is_inventory { rgb(0x0f1115) } else { rgb(0xffffff) })
+                            .cursor_pointer()
                             .pb_1()
+                            .on_mouse_down(gpui::MouseButton::Left, handle_config_tab)
                             .child("插件配置"),
                     )
                     .child(
                         div()
                             .text_xs()
-                            .text_color(rgb(0x81858c))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(if is_inventory { rgb(0x0f1115) } else { rgb(0x81858c) })
+                            .border_b_2()
+                            .border_color(if is_inventory { rgb(0x0f1115) } else { rgb(0xffffff) })
                             .cursor_pointer()
                             .pb_1()
-                            .child("插件列表"),
+                            .on_mouse_down(gpui::MouseButton::Left, handle_inventory_tab)
+                            .child(format!("插件列表 ({})", INSTALLED_PLUGINS.len())),
                     ),
             )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2p5()
-                    .children(builtin_plugins.into_iter().map(|(name, desc)| {
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .p_3p5()
-                            .rounded_xl()
-                            .border_1()
-                            .border_color(rgb(0xe1e5eb))
-                            .bg(rgb(0xffffff))
-                            .hover(|s| s.bg(rgb(0xf9fafb)))
-                            .cursor_pointer()
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_0p5()
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(rgb(0x0f1115))
-                                            .child(name),
-                                    )
-                                    .child(div().text_xs().text_color(rgb(0x61666b)).child(desc)),
-                            )
-                            .child(icons::chevron_down(14.0, rgb(0x81858c)))
-                    })),
-            )
-            .when(!self.mcp_servers.is_empty(), |this| {
+            .when(!is_inventory, |this| {
                 this.child(
                     div()
                         .flex()
                         .flex_col()
-                        .gap_2()
-                        .pt_2()
-                        .child(
+                        .gap_2p5()
+                        .children(builtin_plugins.into_iter().map(|(name, desc)| {
+                            let is_modlens = name.contains("ModLens");
+                            let is_expanded = is_modlens && self.modlens_open;
+                            let handle_click = if is_modlens {
+                                Some(cx.listener(|this, _, _, cx| this.toggle_modlens(cx)))
+                            } else {
+                                None
+                            };
+
                             div()
-                                .text_xs()
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(rgb(0x61666b))
-                                .child("本地 MCP 服务"),
-                        )
-                        .child(div().flex().flex_col().gap_1().children(
-                            self.mcp_servers.iter().enumerate().map(|(index, server)| {
-                                let handle = cx.listener(move |this, _, _, cx| {
-                                    this.toggle_mcp_server(index, cx)
-                                });
-                                let enabled = server.enabled;
-                                let transport = match server.transport {
-                                    McpTransport::Stdio => "stdio",
-                                    McpTransport::Sse => "sse",
-                                };
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .p_3()
-                                    .rounded_lg()
-                                    .border_1()
-                                    .border_color(rgb(0xe5e7eb))
-                                    .bg(rgb(0xffffff))
-                                    .hover(|s| s.bg(rgb(0xf9fafb)))
-                                    .cursor_pointer()
-                                    .on_mouse_down(MouseButton::Left, handle)
-                                    .child(
+                                .flex()
+                                .flex_col()
+                                .rounded_xl()
+                                .border_1()
+                                .border_color(rgb(0xe1e5eb))
+                                .bg(rgb(0xffffff))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .justify_between()
+                                        .p_3p5()
+                                        .hover(|s| s.bg(rgb(0xf9fafb)))
+                                        .cursor_pointer()
+                                        .when_some(handle_click, |this, h| {
+                                            this.on_mouse_down(gpui::MouseButton::Left, h)
+                                        })
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .flex_col()
+                                                .gap_0p5()
+                                                .child(
+                                                    div()
+                                                        .text_sm()
+                                                        .font_weight(FontWeight::MEDIUM)
+                                                        .text_color(rgb(0x0f1115))
+                                                        .child(name),
+                                                )
+                                                .child(div().text_xs().text_color(rgb(0x61666b)).child(desc)),
+                                        )
+                                        .child(icons::chevron_down(14.0, rgb(0x81858c))),
+                                )
+                                .when(is_expanded, |this| {
+                                    this.child(
                                         div()
+                                            .p_3p5()
+                                            .pt_0()
                                             .flex()
                                             .flex_col()
-                                            .gap_1()
+                                            .gap_2p5()
+                                            .border_t_1()
+                                            .border_color(rgb(0xf1f3f5))
                                             .child(
                                                 div()
-                                                    .text_sm()
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .child(server.name.clone()),
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_between()
+                                                    .child(
+                                                        div()
+                                                            .flex()
+                                                            .flex_col()
+                                                            .gap_0p5()
+                                                            .child(
+                                                                div()
+                                                                    .text_xs()
+                                                                    .font_weight(FontWeight::MEDIUM)
+                                                                    .text_color(rgb(0x1f2937))
+                                                                    .child("剪贴板图片自动转路径 (Paste-to-Path)"),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .text_xs()
+                                                                    .text_color(rgb(0x6b7280))
+                                                                    .child("粘贴截图时自动暂存为本地图片文件并插入引用。"),
+                                                            ),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .px_2()
+                                                            .py_0p5()
+                                                            .rounded_full()
+                                                            .bg(rgb(0xdcfce7))
+                                                            .text_xs()
+                                                            .font_weight(FontWeight::MEDIUM)
+                                                            .text_color(rgb(0x15803d))
+                                                            .child("已启用"),
+                                                    ),
                                             )
                                             .child(
                                                 div()
-                                                    .text_xs()
-                                                    .text_color(rgb(0x61666b))
-                                                    .child(server.description.clone()),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_xs()
-                                                    .text_color(rgb(0x81858c))
-                                                    .child(transport),
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_between()
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .font_weight(FontWeight::MEDIUM)
+                                                            .text_color(rgb(0x1f2937))
+                                                            .child("暂存目录"),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .text_xs()
+                                                            .text_color(rgb(0x6b7280))
+                                                            .child(".dsh/attachments"),
+                                                    ),
                                             ),
                                     )
-                                    .child(toggle_mark(enabled))
-                            }),
-                        )),
+                                })
+                        })),
+                )
+                .when(!self.mcp_servers.is_empty(), |this| {
+                    this.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .pt_2()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(rgb(0x61666b))
+                                    .child("本地 MCP 服务"),
+                            )
+                            .child(div().flex().flex_col().gap_1().children(
+                                self.mcp_servers.iter().enumerate().map(|(index, server)| {
+                                    let enabled = server.enabled;
+                                    let handle_toggle = cx.listener(move |this, _, _, cx| {
+                                        this.toggle_mcp_server(index, cx);
+                                    });
+
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .justify_between()
+                                        .p_2p5()
+                                        .rounded_lg()
+                                        .border_1()
+                                        .border_color(rgb(0xe1e5eb))
+                                        .bg(rgb(0xffffff))
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .flex_col()
+                                                .gap_0p5()
+                                                .child(
+                                                    div()
+                                                        .text_xs()
+                                                        .font_weight(FontWeight::MEDIUM)
+                                                        .text_color(rgb(0x0f1115))
+                                                        .child(server.name.clone()),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .text_xs()
+                                                        .text_color(rgb(0x81858c))
+                                                        .child(format!("{:?}", server.transport)),
+                                                ),
+                                        )
+                                        .child(choice_button(
+                                            if enabled { "已启用" } else { "已禁用" },
+                                            enabled,
+                                            handle_toggle,
+                                        ))
+                                }),
+                            )),
+                    )
+                })
+            })
+            .when(is_inventory, |this| {
+                this.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2p5()
+                        .children(INSTALLED_PLUGINS.iter().map(|plugin| {
+                            let is_disabled = self.disabled_plugins.contains(plugin.id);
+                            let plugin_id = plugin.id;
+                            let handle_toggle = cx.listener(move |this, _, _, cx| {
+                                this.toggle_plugin_enabled(plugin_id, cx);
+                            });
+
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .p_3p5()
+                                .rounded_xl()
+                                .border_1()
+                                .border_color(rgb(0xe1e5eb))
+                                .bg(rgb(0xffffff))
+                                .gap_3()
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .flex()
+                                        .flex_col()
+                                        .gap_1()
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap_2()
+                                                .child(
+                                                    div()
+                                                        .text_sm()
+                                                        .font_weight(FontWeight::SEMIBOLD)
+                                                        .text_color(rgb(0x0f1115))
+                                                        .child(plugin.name),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .px_1p5()
+                                                        .py_0p5()
+                                                        .rounded(px(4.0))
+                                                        .bg(rgb(0xf1f3f5))
+                                                        .text_xs()
+                                                        .text_color(rgb(0x61666b))
+                                                        .child(plugin.category),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .text_xs()
+                                                        .text_color(rgb(0x9ca3af))
+                                                        .child(plugin.version),
+                                                ),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(rgb(0x61666b))
+                                                .child(plugin.description),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(rgb(0x9ca3af))
+                                                .child(format!("ID: {}", plugin.id)),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .px_2p5()
+                                        .py_1()
+                                        .rounded_md()
+                                        .bg(if !is_disabled { rgb(0xdcfce7) } else { rgb(0xf3f4f6) })
+                                        .text_xs()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .text_color(if !is_disabled { rgb(0x15803d) } else { rgb(0x6b7280) })
+                                        .cursor_pointer()
+                                        .on_mouse_down(gpui::MouseButton::Left, handle_toggle)
+                                        .child(if !is_disabled { "已启用" } else { "已禁用" }),
+                                )
+                        })),
                 )
             })
     }
@@ -908,25 +1220,165 @@ impl SettingsModal {
             )
     }
 
-    fn sidebar_cards_body(&self, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn sidebar_cards_body(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let handle_sidebar_open = cx.listener(|this, _, _, cx| this.toggle_sidebar_open_pref(cx));
+        let handle_auto_jobs = cx.listener(|this, _, _, cx| this.toggle_auto_jobs_pref(cx));
+        let handle_tree = cx.listener(|this, _, _, cx| this.toggle_workspace_tree_pref(cx));
+        let handle_logs = cx.listener(|this, _, _, cx| this.toggle_terminal_logs_pref(cx));
+
         div()
             .flex()
             .flex_col()
             .gap_4()
             .child(page_heading(
-                "侧边卡片",
-                "配置主界面侧边栏显示的内容卡片与辅助模块。",
+                "侧边卡片与辅助模块",
+                "配置主界面侧边栏显示的内容卡片、默认展开行为与辅助模块（对齐 dsh-better-sidebar）。",
             ))
             .child(
                 div()
-                    .p_4()
-                    .rounded_xl()
-                    .border_1()
-                    .border_color(rgb(0xe1e5eb))
-                    .bg(rgb(0xffffff))
-                    .text_xs()
-                    .text_color(rgb(0x61666b))
-                    .child("已开启默认文件树与工作区卡片。"),
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .p_3p5()
+                            .rounded_xl()
+                            .border_1()
+                            .border_color(rgb(0xe1e5eb))
+                            .bg(rgb(0xffffff))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_0p5()
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(rgb(0x0f1115))
+                                            .child("侧边栏默认展开"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(rgb(0x61666b))
+                                            .child("启动应用或切换工作区时保持侧边栏处于展开状态。"),
+                                    ),
+                            )
+                            .child(choice_button(
+                                if self.sidebar_open_by_default { "已开启" } else { "已关闭" },
+                                self.sidebar_open_by_default,
+                                handle_sidebar_open,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .p_3p5()
+                            .rounded_xl()
+                            .border_1()
+                            .border_color(rgb(0xe1e5eb))
+                            .bg(rgb(0xffffff))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_0p5()
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(rgb(0x0f1115))
+                                            .child("任务与 Subagent 自动提示"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(rgb(0x61666b))
+                                            .child("当会话中有后台任务或 Subagent 正在执行时自动展示状态胶囊。"),
+                                    ),
+                            )
+                            .child(choice_button(
+                                if self.auto_open_jobs { "已开启" } else { "已关闭" },
+                                self.auto_open_jobs,
+                                handle_auto_jobs,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .p_3p5()
+                            .rounded_xl()
+                            .border_1()
+                            .border_color(rgb(0xe1e5eb))
+                            .bg(rgb(0xffffff))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_0p5()
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(rgb(0x0f1115))
+                                            .child("工作区文件树卡片"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(rgb(0x61666b))
+                                            .child("在侧栏中展示工作区多层目录扫描与文件节点。"),
+                                    ),
+                            )
+                            .child(choice_button(
+                                if self.show_workspace_tree { "已开启" } else { "已关闭" },
+                                self.show_workspace_tree,
+                                handle_tree,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .p_3p5()
+                            .rounded_xl()
+                            .border_1()
+                            .border_color(rgb(0xe1e5eb))
+                            .bg(rgb(0xffffff))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_0p5()
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(rgb(0x0f1115))
+                                            .child("终端执行日志抽屉"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(rgb(0x61666b))
+                                            .child("在会话顶部保留 Session Log 实时日志展开与记录导出功能。"),
+                                    ),
+                            )
+                            .child(choice_button(
+                                if self.show_terminal_logs { "已开启" } else { "已关闭" },
+                                self.show_terminal_logs,
+                                handle_logs,
+                            )),
+                    ),
             )
     }
 }
@@ -1385,28 +1837,20 @@ fn status_dot(configured: bool) -> impl IntoElement {
     })
 }
 
-fn toggle_mark(enabled: bool) -> impl IntoElement {
-    div()
-        .size(px(22.0))
-        .rounded_full()
-        .bg(if enabled {
-            rgb(0x3964fe)
-        } else {
-            rgb(0xe1e5eb)
-        })
-        .flex()
-        .items_center()
-        .justify_center()
-        .child(if enabled {
-            icons::check(12.0, rgb(0xffffff)).into_any_element()
-        } else {
-            div().size(px(8.0)).into_any_element()
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_installed_plugins_count() {
+        assert_eq!(INSTALLED_PLUGINS.len(), 10);
+        assert!(INSTALLED_PLUGINS
+            .iter()
+            .any(|p| p.id == "@liustack/modlens"));
+        assert!(INSTALLED_PLUGINS
+            .iter()
+            .any(|p| p.id == "dsh-better-sidebar"));
+    }
 
     #[test]
     fn settings_tabs_cover_all_parity_views() {
