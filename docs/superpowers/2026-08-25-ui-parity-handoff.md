@@ -2,7 +2,7 @@
 
 **更新时间：** 2026-08-26
 
-**基线：** `main` / `origin/main` 的最新提交（`29c11f3` / `feat/plugin-inventory-sidebar-prefs-feedback`）
+**基线：** `main` / `origin/main` 的最新提交（`7e1f469` / `feat/deliverables-skill-card-command-menu`）
 **工作树：** 干净；`.reasonix/` 与 `.superpowers/` 均为本机生成的忽略目录。
 
 本文件记录桌面端应用与官方 Harness（本地 3080 端口）逐项视觉与交互对照、已完成的功能项、修复差距以及后续维护规范。
@@ -20,6 +20,13 @@
 
 ### 对话、轨迹、消息操作与交互组件
 
+- **生成成果物与产出文件胶囊（Deliverables / ProducedFiles）**：
+  - 对齐 `@deepseek-ai/dsh-client-ui-deliverables`，自动识别工具调用（`write_file`、`apply_patch`、`edit_file` 等）生成的产出文件。
+  - 在 Assistant 消息底部渲染带文档矢量图标的 `生成文件:` 胶囊列表，支持点击直接在系统默认编辑器/文件管理器中打开。
+- **技能调用专用卡片与视觉标识（Skill Cards）**：
+  - 对齐 `@deepseek-ai/dsh-client-ui-skill`，对 `skill` / `activate_skill` 工具调用赋予专属紫色高亮徽标（`⚡ 技能: <skill_name>`）与独立执行状态胶囊。
+- **全功能斜杠快捷指令菜单（Slash Commands Menu）**：
+  - 对齐 `@deepseek-ai/dsh-client-ui-commands`，输入框 `+` 菜单全面扩展为带命令名、功能说明与高亮样式的快捷指令弹窗（支持 `/help`、`/model`、`/plan`、`/export`、`/diff`、`/clear`）。
 - **对话与轨迹双重视图与深度检索**：
   - 顶部“对话 / 轨迹”自由切换，轨迹视图真实展示工具调用入参、输出与执行耗时。
   - 轨迹检索输入框深度支持按工具类别（TOOL/LLM/AGENT）、工具名称、执行参数（args）与工具输出（output）全文检索与回合过滤。
@@ -48,7 +55,6 @@
   - 自动生成结构化会话 Markdown / JSON 文件并复制到剪贴板，在日志流中记录导出路径。
 - **工具调用状态细化**：按协议真实 `ToolStatus` 细分“运行中（Running）”、“成功（Success）”与“失败（Error）”状态并渲染对应状态徽标与色彩。
 - **全量可滚动 Session 日志**：支持展开查看全量终端与执行事件日志，支持日志内容复制与导出。
-- **输入区域与命令菜单**：支持文本换行与快捷键提交；支持快速切换权限模式（Full access / Workspace write / Read-only / Ask）、Agent 预设与命令菜单。
 
 ### 模型、设置模态框、插件清单与预设管理
 
@@ -68,25 +74,25 @@
 
 - **多场景 Unified Diff 引擎**：除常规文件修改外，已支持新建文件（`--- /dev/null`）、删除文件（`+++ /dev/null`）及 `\ No newline at end of file` 无换行末尾格式处理。
 - **原子替换与冲突保护**：采用唯一临时文件与上下文严格校验，上下文不匹配时拒绝写入；成功应用或拒绝后自动清除旧的错误提示（`diff_notice`）。
-- **单元测试覆盖**：覆盖原子文件写入、现有文件 diff 修改、新文件生成、文件删除、无尾随换行及上下文不匹配拦截等 16 项 core 单元测试。
+- **单元测试覆盖**：覆盖原子文件写入、现有文件 diff 修改、新文件生成、文件删除、无尾随换行、产出文件提取及上下文不匹配拦截等 17 项 core 单元测试。
 
 ### 视觉一致性与矢量资产
 
 - **全量矢量化图标**：侧栏搜索、视图选项、添加工作区、会话菜单、详情抽屉扳手/关闭/复制、刷新、点赞、点踩、重试、太阳、月亮、显示器、文档、Target 目标、回形针附件、下载导出、播放、暂停、Check 勾选等全面接入 SVG 矢量图标，杜绝 Emoji 或文本符号替代。
-- **官方 Harness 视觉回归**：已对照本地 3080 端口官方 Harness 进行全功能视觉与交互审查（对话、轨迹、侧栏、设置模态框、模型选择、Plan 卡片、问题卡片、GoalBar、任务列表、附件输入、日志导出、插件清单、消息反馈等）。
+- **官方 Harness 视觉回归**：已对照本地 3080 端口官方 Harness 进行全功能视觉与交互审查（对话、轨迹、侧栏、设置模态框、模型选择、Plan 卡片、问题卡片、GoalBar、任务列表、附件输入、日志导出、插件清单、消息反馈、成果物、技能卡片、斜杠菜单等）。
 
 ### 工程交付
 
 - **Windows 独立打包**：`scripts/package_windows.ps1` 可构建并打包包含可执行程序及完整 `assets/` 矢量资源目录的 `DeepSeek-Harness-Desktop-Windows-x64.zip`（~6.27 MB）。
-- **代码质量与测试**：全 workspace 单元测试 51 项全部通过（`cargo test --workspace`），`cargo fmt` 格式化通过，`cargo check -p dsh-ui` 零警告零报错。
+- **代码质量与测试**：全 workspace 单元测试 52 项全部通过（`cargo test --workspace`），`cargo fmt` 格式化通过，`cargo check -p dsh-ui` 零警告零报错。
 
 ## 关键实现入口
 
 | 领域 | 入口 |
 | --- | --- |
-| 会话、持久化、Plan 与问题状态、Goal 目标、任务状态、服务端事件、diff 操作、导出格式化 | `crates/dsh-core/src/lib.rs` |
+| 会话、持久化、Plan 与问题状态、Goal 目标、任务状态、服务端事件、diff 操作、导出格式化、产出文件识别 | `crates/dsh-core/src/lib.rs` |
 | unified diff 解析、新建/删除与原子写入 | `crates/dsh-core/src/diff_applier.rs` |
-| 主对话、轨迹深度检索过滤、Plan 卡片、问题卡片、GoalBar、任务状态列表、附件栏、消息点赞/点踩与即时复制反馈、代码块复制反馈、底栏统计、会话日志导出 | `crates/dsh-ui/src/chat_view.rs` |
+| 主对话、生成成果物胶囊、技能卡片、斜杠快捷菜单、轨迹深度检索过滤、Plan 卡片、问题卡片、GoalBar、任务状态列表、附件栏、消息点赞/点踩与即时复制反馈、代码块复制反馈、底栏统计、会话日志导出 | `crates/dsh-ui/src/chat_view.rs` |
 | 模型目录与提供方分组 | `crates/dsh-ui/src/model_catalog.rs` |
 | 设置模态框、主题选择、预设 2x2 网格、插件清单与配置切换、侧边栏卡片偏好、ModLens 与 MCP | `crates/dsh-ui/src/settings_modal.rs` |
 | 侧栏、工作区树、搜索排序、相对时间与会话菜单 | `crates/dsh-ui/src/sidebar.rs`、`crates/dsh-ui/src/dropdown.rs` |
