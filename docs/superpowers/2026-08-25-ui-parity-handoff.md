@@ -2,7 +2,7 @@
 
 **更新时间：** 2026-08-26
 
-**基线：** `main` / `origin/main` 的最新提交（`8991bd7` / `feat/ui-parity-polish`）
+**基线：** `main` / `origin/main` 的最新提交（`a9f1d69` / `feat/plan-and-interactive-questions`）
 **工作树：** 干净；`.reasonix/` 与 `.superpowers/` 均为本机生成的忽略目录。
 
 本文件记录桌面端应用与官方 Harness（本地 3080 端口）逐项视觉与交互对照、已完成的功能项、修复差距以及后续维护规范。
@@ -18,11 +18,16 @@
 - **可展开折叠的 Explorer 文件树**：支持多层目录递归扫描、展开/折叠状态管理，并提供一键刷新与 Explorer 面板折叠展开（`▸` / `▾`）；文件项可交给系统默认程序打开。
 - **侧栏检索与视图排序**：支持会话名称过滤搜索以及“按最近使用”与“按名称”排序切换。
 
-### 对话、轨迹、消息操作与工具状态
+### 对话、轨迹、消息操作与交互组件
 
-- **对话与轨迹双重视图**：顶部“对话 / 轨迹”自由切换，轨迹视图真实展示工具调用入参、输出与执行耗时；详情抽屉支持参数和输出的一键复制。
+- **对话与轨迹双重视图**：顶部“对话 / 轨迹”自由切换，轨迹视图真实展示工具调用入参、输出与执行耗时；详情抽屉支持参数和输出的一键复制（带 SVG 矢量图标）。
 - **消息交互与代码块操作**：Assistant 消息底部提供操作条（复制、点赞、点踩、重试/Fork 按钮），支持消息内容与代码块独立一键复制到剪贴板，带有悬浮效果。
-- **输入框底部运行时统计栏（Stats Line）**：完全对齐官方 Harness 统计栏，动态格式化输出 `X 轮 · Y 步 | LLM ... · 工具调用 ... | 首 token 平均 ... · ... token/s | 缓存命中 ...% | 输入 ... · 输出 ...`，0 步骤时平滑回退，包含完整单元测试。
+- **输入框底部运行时统计栏（Stats Line）**：完全对齐官方 Harness 统计栏，动态格式化输出 `X 轮 · Y 步 | LLM ... · 工具调用 ... | 首 token 平均 ... · ... token/s | 缓存命中 ...% | 输入 ... · 输出 ...`，0 步骤时平滑回退。
+- **Plan 模式徽标与审核卡片（Plan Review）**：
+  - 输入框内支持渲染琥珀色 Plan 模式徽标（`Plan ✕`），点击退出 Plan 模式。
+  - 会话流中支持呈现 Plan 计划审核卡片（包含琥珀色状态指示、Markdown 计划内容展示与“批准计划”操作）。
+- **交互式方案选择卡片（Question Cards）**：
+  - 支持服务端下发交互式多选/单选方案卡片（`QuestionPrompt`），渲染选项胶囊按钮并在前端交互选中，点击“确认选择”回传服务端。
 - **工具调用状态细化**：按协议真实 `ToolStatus` 细分“运行中（Running）”、“成功（Success）”与“失败（Error）”状态并渲染对应状态徽标与色彩。
 - **全量可滚动 Session 日志**：支持展开查看全量终端与执行事件日志，支持日志内容复制与导出。
 - **输入区域与命令菜单**：支持文本换行与快捷键提交；支持快速切换权限模式（Full access / Workspace write / Read-only / Ask）、Agent 预设与命令菜单。
@@ -44,21 +49,21 @@
 
 ### 视觉一致性与矢量资产
 
-- **全量矢量化图标**：侧栏搜索、视图选项、添加工作区、会话菜单、详情抽屉扳手/关闭、刷新、复制、点赞、点踩、重试、太阳、月亮、显示器、文档等全面接入 SVG 矢量图标，杜绝 Emoji 或文本符号替代。
-- **官方 Harness 视觉回归**：已对照本地 3080 端口官方 Harness 进行全功能视觉与交互审查（对话、轨迹、侧栏、设置模态框、模型选择等）。
+- **全量矢量化图标**：侧栏搜索、视图选项、添加工作区、会话菜单、详情抽屉扳手/关闭/复制、刷新、点赞、点踩、重试、太阳、月亮、显示器、文档等全面接入 SVG 矢量图标，杜绝 Emoji 或文本符号替代。
+- **官方 Harness 视觉回归**：已对照本地 3080 端口官方 Harness 进行全功能视觉与交互审查（对话、轨迹、侧栏、设置模态框、模型选择、Plan 卡片与问题卡片等）。
 
 ### 工程交付
 
 - **Windows 独立打包**：`scripts/package_windows.ps1` 可构建并打包包含可执行程序及完整 `assets/` 矢量资源目录的 `DeepSeek-Harness-Desktop-Windows-x64.zip`。
-- **代码质量与测试**：全 workspace 单元测试 40 项全部通过（`cargo test --workspace`），`cargo fmt` 格式化通过，`cargo check -p dsh-ui` 零警告零报错。
+- **代码质量与测试**：全 workspace 单元测试 44 项全部通过（`cargo test --workspace`），`cargo fmt` 格式化通过，`cargo check -p dsh-ui` 零警告零报错。
 
 ## 关键实现入口
 
 | 领域 | 入口 |
 | --- | --- |
-| 会话、持久化、服务端事件、diff 操作 | `crates/dsh-core/src/lib.rs` |
+| 会话、持久化、Plan 与问题状态、服务端事件、diff 操作 | `crates/dsh-core/src/lib.rs` |
 | unified diff 解析、新建/删除与原子写入 | `crates/dsh-core/src/diff_applier.rs` |
-| 主对话、轨迹、消息操作、代码块复制、底栏统计、会话日志 | `crates/dsh-ui/src/chat_view.rs` |
+| 主对话、轨迹、Plan 卡片、问题卡片、消息操作、代码块复制、底栏统计、会话日志 | `crates/dsh-ui/src/chat_view.rs` |
 | 模型目录与提供方分组 | `crates/dsh-ui/src/model_catalog.rs` |
 | 设置模态框、主题选择、预设 2x2 网格、插件管理 | `crates/dsh-ui/src/settings_modal.rs` |
 | 侧栏、工作区树、搜索排序、相对时间与会话菜单 | `crates/dsh-ui/src/sidebar.rs`、`crates/dsh-ui/src/dropdown.rs` |

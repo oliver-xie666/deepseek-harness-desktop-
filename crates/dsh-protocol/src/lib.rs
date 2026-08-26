@@ -24,6 +24,16 @@ pub enum HarnessClientMessage {
     AcceptDiff { session_id: String, diff_id: String },
     /// User rejects generated file diff
     RejectDiff { session_id: String, diff_id: String },
+    /// Toggle Plan mode for session
+    TogglePlanMode { session_id: String, enabled: bool },
+    /// User answers an interactive question prompt
+    AnswerQuestion {
+        session_id: String,
+        question_id: String,
+        selected: Vec<String>,
+        #[serde(default)]
+        custom_text: Option<String>,
+    },
     /// Ping daemon for health status
     Ping,
 }
@@ -70,6 +80,20 @@ pub enum HarnessServerEvent {
         session_id: String,
         state: AgentState,
     },
+    /// Plan mode status and markdown plan updates
+    PlanUpdate {
+        session_id: String,
+        active: bool,
+        plan_markdown: String,
+    },
+    /// Interactive question prompt asking for user decision
+    QuestionPrompt {
+        session_id: String,
+        question_id: String,
+        prompt: String,
+        options: Vec<String>,
+        multi_select: bool,
+    },
     /// Realtime terminal/shell execution log
     TerminalLog {
         session_id: String,
@@ -101,6 +125,22 @@ pub enum AgentState {
     Error,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct PlanState {
+    pub active: bool,
+    pub plan_markdown: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QuestionItem {
+    pub id: String,
+    pub prompt: String,
+    pub options: Vec<String>,
+    pub multi_select: bool,
+    #[serde(default)]
+    pub answered: Option<Vec<String>>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionMetadata {
     pub id: String,
@@ -129,6 +169,27 @@ mod tests {
     }
 
     #[test]
+    fn test_client_plan_and_question_roundtrip() {
+        let plan_msg = HarnessClientMessage::TogglePlanMode {
+            session_id: "sess-123".to_string(),
+            enabled: true,
+        };
+        let json = serde_json::to_string(&plan_msg).unwrap();
+        let parsed: HarnessClientMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(plan_msg, parsed);
+
+        let answer_msg = HarnessClientMessage::AnswerQuestion {
+            session_id: "sess-123".to_string(),
+            question_id: "q-1".to_string(),
+            selected: vec!["Option A".to_string()],
+            custom_text: Some("Note".to_string()),
+        };
+        let json = serde_json::to_string(&answer_msg).unwrap();
+        let parsed: HarnessClientMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(answer_msg, parsed);
+    }
+
+    #[test]
     fn test_server_event_roundtrip() {
         let event = HarnessServerEvent::TokenChunk {
             session_id: "sess-123".to_string(),
@@ -139,5 +200,27 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         let parsed: HarnessServerEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(event, parsed);
+
+        let plan_event = HarnessServerEvent::PlanUpdate {
+            session_id: "sess-123".to_string(),
+            active: true,
+            plan_markdown: "1. Step 1
+2. Step 2"
+                .to_string(),
+        };
+        let json = serde_json::to_string(&plan_event).unwrap();
+        let parsed: HarnessServerEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(plan_event, parsed);
+
+        let q_event = HarnessServerEvent::QuestionPrompt {
+            session_id: "sess-123".to_string(),
+            question_id: "q-1".to_string(),
+            prompt: "Choose an approach".to_string(),
+            options: vec!["Approach 1".to_string(), "Approach 2".to_string()],
+            multi_select: false,
+        };
+        let json = serde_json::to_string(&q_event).unwrap();
+        let parsed: HarnessServerEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(q_event, parsed);
     }
 }
