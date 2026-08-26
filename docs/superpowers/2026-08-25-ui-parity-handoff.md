@@ -1,9 +1,9 @@
 # UI 持续优化交接
 
-**更新时间：** 2026-08-25
+**更新时间：** 2026-08-26
 
-**基线：** `main` / `origin/main` 的 `1f15a65`（`merge: prevent preset copy selection`）
-**工作树：** 交接开始时干净；`.reasonix/` 与 `.superpowers/` 均为本机生成的忽略目录。
+**基线：** `main` / `origin/main` 的 `6ace852`（`merge: refine model catalog, diff applier, and vector icons`）
+**工作树：** 干净；`.reasonix/` 与 `.superpowers/` 均为本机生成的忽略目录。
 
 本文件记录桌面端应用与官方 Harness（本地 3080 端口）逐项视觉与交互对照、已完成的功能项、修复差距以及后续维护规范。
 
@@ -16,18 +16,22 @@
 - **可展开折叠的 Explorer 文件树**：支持多层目录递归扫描、展开/折叠状态管理，并提供刷新按钮；文件项可交给系统默认程序打开。
 - **侧栏检索与视图排序**：支持会话名称过滤搜索以及“按最近使用”与“按名称”排序切换。
 
-### 对话、轨迹与工具状态
+### 对话、轨迹、消息操作与工具状态
 
 - **对话与轨迹双重视图**：顶部“对话 / 轨迹”自由切换，轨迹视图真实展示工具调用入参、输出与执行耗时；详情抽屉支持参数和输出的一键复制。
+- **消息交互与代码块操作**：Assistant 消息底部提供操作条（复制、点赞、点踩、重试/Fork 按钮），支持消息内容与代码块独立一键复制到剪贴板，带有悬浮效果。
 - **工具调用状态细化**：按协议真实 `ToolStatus` 细分“运行中（Running）”、“成功（Success）”与“失败（Error）”状态并渲染对应状态徽标与色彩。
 - **全量可滚动 Session 日志**：支持展开查看全量终端与执行事件日志，支持日志内容复制与导出。
-- **输入区域与命令菜单**：支持文本换行与快捷键提交；支持快速切换权限模式（Full access / Read-only / Ask）、Agent 预设与命令菜单（`/help`、`/model`、`/clear`）。
+- **输入区域与命令菜单**：支持文本换行与快捷键提交；支持快速切换权限模式（Full access / Workspace write / Read-only / Ask）、Agent 预设与命令菜单。
 
-### 模型与提供方管理
+### 模型、设置模态框与预设管理
 
 - **提供方层级化模型目录**：模型选项按提供方（DeepSeek 官方、DeepSeek 视觉增强、自定义/bytecat 等）分组呈现，保留自定义模型与扩展模型能力。
-- **设置模态框完备性**：常规设置、模型设置、插件配置和 Agent 预设页均接入 GPUI `ScrollHandle` 垂直滚动容器，避免内容裁切；模型密钥配置状态实时指示。
-- **预设复制事件隔离**：Agent 预设卡片复制按钮使用 `stop_propagation()`，解决点击复制误触发选中卡片的问题。
+- **设置模态框完备性**：常规设置、模型设置、插件配置、Agent 预设与侧边卡片等 5 大导航页全面接入 GPUI `ScrollHandle` 垂直滚动容器，右上角支持打开配置文件目录与关闭操作。
+- **外观主题多态选择**：通用设置提供“浅色”、“深色”与“跟随系统”三态卡片，集成独立矢量图标与激活边框高亮。
+- **模型提供方管理**：模型设置呈现 DeepSeek 官方与 bytecat 自定义提供方卡片，支持展开内嵌表单配置 API 密钥、选择默认模型及保存/取消。
+- **Agent 预设 2x2 网格对齐**：Agent 预设采用 2x2 双列网格卡片布局（标准模式、PTC 模式、极简模式、创造模式），完整展示“内置”、“当前使用”徽标、key 标识及文档/复制按钮；复制事件采用 `stop_propagation()` 彻底隔离点击穿透。
+- **插件与 MCP 管理**：插件设置支持内置插件配置项手风琴折叠以及本地 MCP 服务状态开关。
 
 ### Diff 审查与应用引擎
 
@@ -37,19 +41,13 @@
 
 ### 视觉一致性与矢量资产
 
-- **全量矢量化图标**：侧栏搜索、视图选项、添加工作区、会话菜单（更多操作）、详情抽屉扳手/关闭、刷新等全面替换为与官方一致的 SVG 矢量图标，杜绝 Emoji 或文本符号替代。
-- **官方 Harness 视觉回归**：已启动官方 Harness（3080 端口），完成设置、侧栏、对话、轨迹、模型下拉与导出弹窗等关键屏的截图与比对验证。
+- **全量矢量化图标**：侧栏搜索、视图选项、添加工作区、会话菜单、详情抽屉扳手/关闭、刷新、复制、点赞、点踩、重试、太阳、月亮、显示器、文档等全面接入 SVG 矢量图标，杜绝 Emoji 或文本符号替代。
+- **官方 Harness 视觉回归**：已对照本地 3080 端口官方 Harness 进行全功能视觉与交互审查（对话、轨迹、侧栏、设置模态框、模型选择等）。
 
 ### 工程交付
 
 - **Windows 独立打包**：`scripts/package_windows.ps1` 可构建并打包包含可执行程序及完整 `assets/` 矢量资源目录的 `DeepSeek-Harness-Desktop-Windows-x64.zip`。
-- **代码质量与测试**：全 workspace 单元测试 33 项全部通过（`cargo test --workspace`），`cargo fmt` 格式化通过，`cargo check -p dsh-ui` 零警告零报错。
-
-## 后续建议与演进
-
-1. **虚拟列表优化**：对于超长历史会话（数百轮以上），可进一步引入基于 GPUI `uniform_list` 或视图虚拟化渲染。
-2. **三方宏兼容性追踪**：持续关注上游 `proc-macro-error2` 等过渡警告的依赖版本更新。
-3. **CI/CD 自动化流水线**：接入自动化 GitHub Actions 进行打包与 Windows Release 产物发布。
+- **代码质量与测试**：全 workspace 单元测试 35 项全部通过（`cargo test --workspace`），`cargo fmt` 格式化通过，`cargo check -p dsh-ui` 零警告零报错。
 
 ## 关键实现入口
 
@@ -57,9 +55,9 @@
 | --- | --- |
 | 会话、持久化、服务端事件、diff 操作 | `crates/dsh-core/src/lib.rs` |
 | unified diff 解析、新建/删除与原子写入 | `crates/dsh-core/src/diff_applier.rs` |
-| 主对话、轨迹、输入、diff 卡片、会话日志 | `crates/dsh-ui/src/chat_view.rs` |
+| 主对话、轨迹、消息操作、代码块复制、会话日志 | `crates/dsh-ui/src/chat_view.rs` |
 | 模型目录与提供方分组 | `crates/dsh-ui/src/model_catalog.rs` |
-| 设置与模型配置 | `crates/dsh-ui/src/settings_modal.rs` |
+| 设置模态框、主题选择、预设 2x2 网格、插件管理 | `crates/dsh-ui/src/settings_modal.rs` |
 | 侧栏、工作区树、搜索排序与会话菜单 | `crates/dsh-ui/src/sidebar.rs`、`crates/dsh-ui/src/dropdown.rs` |
 | 矢量图标体系 | `crates/dsh-ui/src/icons.rs`、`crates/dsh-ui/assets/` |
 | 标题和工作区同步 | `crates/dsh-ui/src/title_bar.rs`、`crates/dsh-ui/src/workspace.rs` |

@@ -1,11 +1,11 @@
-//! Official DeepSeek Harness vector glyphs, rendered through GPUI's `svg()`
-//! element. Each glyph is an alpha mask tinted by `color` (the `currentColor`
-//! semantics of the upstream `dsh-client-ui-primitives` icon set), so a single
+//! Official DeepSeek Harness vector glyphs, rendered through GPUI's svg()
+//! element. Each glyph is an alpha mask tinted by color (the currentColor
+//! semantics of the upstream dsh-client-ui-primitives icon set), so a single
 //! color argument reproduces the exact same look as the web UI.
 //!
-//! Assets resolve at runtime: prefer a sibling `assets/` directory next to the
+//! Assets resolve at runtime: prefer a sibling ssets/ directory next to the
 //! executable (packaged layout), falling back to the source tree during
-//! `cargo run`. Call [`init_assets`] once at startup to pick the packaged dir.
+//! cargo run. Call [init_assets] once at startup to pick the packaged dir.
 
 use gpui::{prelude::*, px, svg, Hsla, IntoElement};
 use std::path::PathBuf;
@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 static ASSET_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// Set the packaged assets directory. Call once at startup when an
-/// executable-relative `assets/` directory exists; otherwise the source-tree
+/// executable-relative ssets/ directory exists; otherwise the source-tree
 /// fallback is used automatically.
 pub fn init_assets(dir: PathBuf) {
     let _ = ASSET_DIR.set(dir);
@@ -146,7 +146,7 @@ pub fn add_workspace(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
         .h(px(size))
 }
 
-/// More horizontal options `⋯` glyph.
+/// More horizontal options ⋯ glyph.
 pub fn more_horizontal(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
     svg()
         .external_path(asset("more_horizontal.svg"))
@@ -168,6 +168,42 @@ pub fn wrench(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
 pub fn refresh(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
     svg()
         .external_path(asset("refresh.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
+
+/// Copy glyph.
+pub fn copy(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("copy.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
+
+/// Thumbs up glyph.
+pub fn thumbs_up(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("thumbs_up.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
+
+/// Thumbs down glyph.
+pub fn thumbs_down(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("thumbs_down.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
+
+/// Retry / fork glyph.
+pub fn retry(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("retry.svg"))
         .text_color(color)
         .w(px(size))
         .h(px(size))
@@ -204,6 +240,42 @@ pub fn send(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
 pub fn close(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
     svg()
         .external_path(asset("close.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
+
+/// Sun glyph (light theme).
+pub fn sun(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("sun.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
+
+/// Moon glyph (dark theme).
+pub fn moon(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("moon.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
+
+/// Monitor glyph (system theme).
+pub fn monitor(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("monitor.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
+
+/// Document / file text glyph (preset card).
+pub fn document(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("document.svg"))
         .text_color(color)
         .w(px(size))
         .h(px(size))
