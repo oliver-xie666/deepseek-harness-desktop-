@@ -1896,23 +1896,54 @@ impl ChatView {
     fn render_plus_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let handle_help = cx.listener(|this, _, _, cx| this.insert_command("/help", cx));
         let handle_model = cx.listener(|this, _, _, cx| this.insert_command("/model", cx));
+        let handle_plan = cx.listener(|this, _, _, cx| this.insert_command("/plan", cx));
+        let handle_export = cx.listener(|this, _, _, cx| this.insert_command("/export", cx));
+        let handle_diff = cx.listener(|this, _, _, cx| this.insert_command("/diff", cx));
         let handle_clear = cx.listener(|this, _, _, cx| this.insert_command("/clear", cx));
         div()
             .absolute()
             .bottom(px(36.0))
             .left(px(0.0))
-            .w(px(180.0))
+            .w(px(220.0))
             .p_1()
-            .rounded_lg()
+            .rounded_xl()
             .bg(rgb(0xffffff))
             .border_1()
             .border_color(rgb(0xe1e5eb))
             .shadow_lg()
             .flex()
             .flex_col()
-            .child(menu_choice("/help", false, handle_help))
-            .child(menu_choice("/model", false, handle_model))
-            .child(menu_choice("/clear", false, handle_clear))
+            .gap_0p5()
+            .child(command_menu_item(
+                "/help",
+                "查看帮助文档与快捷指令",
+                handle_help,
+            ))
+            .child(command_menu_item(
+                "/model",
+                "切换并配置大模型",
+                handle_model,
+            ))
+            .child(command_menu_item(
+                "/plan",
+                "进入/退出 Plan 规划模式",
+                handle_plan,
+            ))
+            .child(command_menu_item(
+                "/export",
+                "导出会话与执行日志",
+                handle_export,
+            ))
+            .child(command_menu_item(
+                "/diff",
+                "审查与应用代码变更",
+                handle_diff,
+            ))
+            .child(command_menu_item(
+                "/clear",
+                "清空当前会话内容",
+                handle_clear,
+            ))
     }
 
     fn render_plus_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2461,6 +2492,20 @@ impl ChatView {
                             let status = tool.status;
                             let status_label = tool_status_label(status);
                             let status_color = tool_status_color(status);
+                            let is_skill =
+                                tool.tool_name == "skill" || tool.tool_name == "activate_skill";
+                            let display_label = if is_skill {
+                                let skill_name = tool
+                                    .input
+                                    .get("name")
+                                    .or_else(|| tool.input.get("skill"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or(&tool.tool_name);
+                                format!("⚡ 技能: {} ({})", skill_name, status_label)
+                            } else {
+                                format!("{} ({})", tool.tool_name, status_label)
+                            };
+
                             let handle_tool_click = cx.listener(move |_this, _, _, cx| {
                                 drawer_entity.update(cx, |drawer, cx| {
                                     drawer.open_tool(&title, duration, &args, &output, cx);
@@ -2473,18 +2518,34 @@ impl ChatView {
                                 .px_3()
                                 .py_1p5()
                                 .rounded_md()
-                                .bg(rgb(0xf5f6f8))
+                                .bg(if is_skill {
+                                    rgb(0xf5f3ff)
+                                } else {
+                                    rgb(0xf5f6f8)
+                                })
                                 .border_1()
-                                .border_color(status_color)
+                                .border_color(if is_skill {
+                                    rgb(0xc4b5fd)
+                                } else {
+                                    status_color
+                                })
                                 .hover(|s| s.bg(rgb(0xf1f3f5)).border_color(rgb(0x3964fe)))
                                 .cursor_pointer()
                                 .on_mouse_down(gpui::MouseButton::Left, handle_tool_click)
-                                .child(icons::agent_preset(14.0, status_color))
+                                .child(if is_skill {
+                                    icons::agent_preset(14.0, rgb(0x8b5cf6)).into_any_element()
+                                } else {
+                                    icons::agent_preset(14.0, status_color).into_any_element()
+                                })
                                 .child(
                                     div()
                                         .text_xs()
-                                        .text_color(rgb(0x61666b))
-                                        .child(format!("{} ({})", tool.tool_name, status_label)),
+                                        .text_color(if is_skill {
+                                            rgb(0x6b21a8)
+                                        } else {
+                                            rgb(0x61666b)
+                                        })
+                                        .child(display_label),
                                 )
                                 .child(div().text_xs().text_color(status_color).child(
                                     if status == ToolStatus::Running {
@@ -2499,6 +2560,13 @@ impl ChatView {
                             StreamingMarkdownParser::parse_markdown(&message.content)
                                 .into_iter()
                                 .map(|block| self.render_markdown_block(block, cx)),
+                        )
+                        .when(
+                            !dsh_core::extract_produced_files(&message.tool_calls).is_empty(),
+                            |this| {
+                                let files = dsh_core::extract_produced_files(&message.tool_calls);
+                                this.child(render_deliverables_chips(&files, cx))
+                            },
                         )
                         .child({
                             let is_copied = self.copied_msg_id.as_deref() == Some(&message.id);
@@ -2887,6 +2955,100 @@ impl Render for ChatView {
                 )
             })
     }
+}
+
+fn render_deliverables_chips(files: &[String], cx: &mut Context<ChatView>) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .gap_2()
+        .pt_2()
+        .mt_1()
+        .border_t_1()
+        .border_color(rgb(0xf1f3f5))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .text_xs()
+                .text_color(rgb(0x81858c))
+                .child(icons::document(12.0, rgb(0x81858c)))
+                .child("生成文件:"),
+        )
+        .children(files.iter().map(|file_path| {
+            let path_clone = file_path.clone();
+            let basename = file_path
+                .split(['/', '\\'])
+                .last()
+                .unwrap_or(file_path)
+                .to_string();
+            let handle_open = cx.listener(move |_this, _, _, _| {
+                #[cfg(target_os = "windows")]
+                {
+                    let _ = std::process::Command::new("explorer")
+                        .arg(&path_clone)
+                        .spawn();
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let _ = std::process::Command::new("open").arg(&path_clone).spawn();
+                }
+            });
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .px_2()
+                .py_0p5()
+                .rounded_md()
+                .bg(rgb(0xf1f3f5))
+                .hover(|s| s.bg(rgb(0xe5e7eb)))
+                .cursor_pointer()
+                .on_mouse_down(gpui::MouseButton::Left, handle_open)
+                .text_xs()
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(rgb(0x374151))
+                .child(basename)
+        }))
+}
+
+fn command_menu_item(
+    command: &str,
+    desc: &str,
+    handler: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_2()
+        .px_2p5()
+        .py_1p5()
+        .rounded_lg()
+        .hover(|s| s.bg(rgb(0xf1f3f5)))
+        .cursor_pointer()
+        .on_mouse_down(gpui::MouseButton::Left, handler)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_0p5()
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(rgb(0x3964fe))
+                        .child(command.to_string()),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(rgb(0x81858c))
+                        .child(desc.to_string()),
+                ),
+        )
 }
 
 fn menu_choice(

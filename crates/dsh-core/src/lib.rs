@@ -52,6 +52,40 @@ pub struct ToolCallItem {
     pub duration_ms: u64,
 }
 
+/// Extract produced / modified file paths from tool calls (e.g. deliverables)
+pub fn extract_produced_files(tool_calls: &[ToolCallItem]) -> Vec<String> {
+    let mut paths = Vec::new();
+    for tool in tool_calls {
+        if tool.status == ToolStatus::Failed {
+            continue;
+        }
+        let name = tool.tool_name.to_lowercase();
+        if name.contains("write")
+            || name.contains("edit")
+            || name.contains("patch")
+            || name.contains("create")
+            || name.contains("save")
+            || name.contains("deliverable")
+        {
+            if let Some(path_val) = tool
+                .input
+                .get("path")
+                .or_else(|| tool.input.get("filepath"))
+                .or_else(|| tool.input.get("file"))
+                .or_else(|| tool.input.get("target"))
+            {
+                if let Some(path_str) = path_val.as_str() {
+                    let trimmed = path_str.trim();
+                    if !trimmed.is_empty() && !paths.contains(&trimmed.to_string()) {
+                        paths.push(trimmed.to_string());
+                    }
+                }
+            }
+        }
+    }
+    paths
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FileDiffItem {
     pub id: String,
@@ -968,5 +1002,49 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_extract_produced_files_from_tool_calls() {
+        let tools = vec![
+            ToolCallItem {
+                id: "t1".into(),
+                tool_name: "write_file".into(),
+                input: serde_json::json!({ "path": "src/main.rs", "content": "fn main() {}" }),
+                output: Some(serde_json::json!({ "success": true })),
+                status: ToolStatus::Success,
+                duration_ms: 25,
+            },
+            ToolCallItem {
+                id: "t2".into(),
+                tool_name: "read_file".into(),
+                input: serde_json::json!({ "path": "Cargo.toml" }),
+                output: Some(serde_json::json!({ "content": "[package]" })),
+                status: ToolStatus::Success,
+                duration_ms: 10,
+            },
+            ToolCallItem {
+                id: "t3".into(),
+                tool_name: "apply_patch".into(),
+                input: serde_json::json!({ "path": "src/lib.rs", "patch": "..." }),
+                output: None,
+                status: ToolStatus::Failed,
+                duration_ms: 5,
+            },
+            ToolCallItem {
+                id: "t4".into(),
+                tool_name: "apply_patch".into(),
+                input: serde_json::json!({ "path": "src/config.rs", "patch": "..." }),
+                output: Some(serde_json::json!({ "success": true })),
+                status: ToolStatus::Success,
+                duration_ms: 30,
+            },
+        ];
+
+        let files = extract_produced_files(&tools);
+        assert_eq!(
+            files,
+            vec!["src/main.rs".to_string(), "src/config.rs".to_string()]
+        );
     }
 }
