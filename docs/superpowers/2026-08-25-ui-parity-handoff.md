@@ -2,7 +2,7 @@
 
 **更新时间：** 2026-08-26
 
-**基线：** `main` / `origin/main` 的最新提交（`b19e4b8` / `feat/jobs-goal-modlens-export`）
+**基线：** `main` / `origin/main` 的最新提交（`29c11f3` / `feat/plugin-inventory-sidebar-prefs-feedback`）
 **工作树：** 干净；`.reasonix/` 与 `.superpowers/` 均为本机生成的忽略目录。
 
 本文件记录桌面端应用与官方 Harness（本地 3080 端口）逐项视觉与交互对照、已完成的功能项、修复差距以及后续维护规范。
@@ -20,8 +20,14 @@
 
 ### 对话、轨迹、消息操作与交互组件
 
-- **对话与轨迹双重视图**：顶部“对话 / 轨迹”自由切换，轨迹视图真实展示工具调用入参、输出与执行耗时；详情抽屉支持参数和输出的一键复制（带 SVG 矢量图标）。
-- **消息交互与代码块操作**：Assistant 消息底部提供操作条（复制、点赞、点踩、重试/Fork 按钮），支持消息内容与代码块独立一键复制到剪贴板，带有悬浮效果。
+- **对话与轨迹双重视图与深度检索**：
+  - 顶部“对话 / 轨迹”自由切换，轨迹视图真实展示工具调用入参、输出与执行耗时。
+  - 轨迹检索输入框深度支持按工具类别（TOOL/LLM/AGENT）、工具名称、执行参数（args）与工具输出（output）全文检索与回合过滤。
+  - 提供单回合折叠/展开与全量一键折叠/展开（`▸` / `▾`）及耗时模式切换。
+  - 详情抽屉支持参数和输出的一键复制（带 SVG 矢量图标）。
+- **消息交互、点赞点踩与复制即时反馈**：
+  - Assistant 消息底部操作条提供复制、点赞（Thumbs Up，激活高亮蓝色）、点踩（Thumbs Down，激活高亮红色）、重试/Fork 按钮。
+  - 消息内容复制与 Markdown 代码块独立复制按钮提供即时视觉反馈（绿色 Check 矢量图标与“已复制”提示）。
 - **输入框底部运行时统计栏（Stats Line）**：完全对齐官方 Harness 统计栏，动态格式化输出 `X 轮 · Y 步 | LLM ... · 工具调用 ... | 首 token 平均 ... · ... token/s | 缓存命中 ...% | 输入 ... · 输出 ...`，0 步骤时平滑回退。
 - **Plan 模式徽标与审核卡片（Plan Review）**：
   - 输入框内支持渲染琥珀色 Plan 模式徽标（`Plan ✕`），点击退出 Plan 模式。
@@ -44,14 +50,19 @@
 - **全量可滚动 Session 日志**：支持展开查看全量终端与执行事件日志，支持日志内容复制与导出。
 - **输入区域与命令菜单**：支持文本换行与快捷键提交；支持快速切换权限模式（Full access / Workspace write / Read-only / Ask）、Agent 预设与命令菜单。
 
-### 模型、设置模态框与预设管理
+### 模型、设置模态框、插件清单与预设管理
 
 - **提供方层级化模型目录**：模型选项按提供方（DeepSeek 官方、DeepSeek 视觉增强、自定义/bytecat 等）分组呈现，保留自定义模型与扩展模型能力。
 - **设置模态框完备性**：常规设置、模型设置、插件配置、Agent 预设与侧边卡片等 5 大导航页全面接入 GPUI `ScrollHandle` 垂直滚动容器，右上角支持打开配置文件目录与关闭操作。
+- **插件清单与插件配置切换（Plugin Inventory）**：
+  - “插件”导航支持“插件配置”与“插件列表 (10)”分段切换。
+  - 完整呈现 10 项已安装核心插件清单、官方包名 ID、分类徽标、版本、描述与启用/禁用开关。
+- **侧边栏卡片偏好管理（Sidebar Cards Prefs）**：
+  - 提供侧栏默认展开、任务与 Subagent 自动提示、工作区文件树卡片、终端执行日志抽屉 4 项独立偏好开关。
 - **外观主题多态选择**：通用设置提供“浅色”、“深色”与“跟随系统”三态卡片，集成独立矢量图标与激活边框高亮。
 - **模型提供方管理**：模型设置呈现 DeepSeek 官方与 bytecat 自定义提供方卡片，支持展开内嵌表单配置 API 密钥、选择默认模型及保存/取消。
 - **Agent 预设 2x2 网格对齐**：Agent 预设采用 2x2 双列网格卡片布局（标准模式、PTC 模式、极简模式、创造模式），完整展示“内置”、“当前使用”徽标、key 标识及文档/复制按钮；复制事件采用 `stop_propagation()` 彻底隔离点击穿透。
-- **插件与 MCP 管理**：插件设置支持内置插件（包含视觉引擎 ModLens 展开配置）手风琴折叠以及本地 MCP 服务状态开关。
+- **MCP 服务管理**：支持内置插件（包含视觉引擎 ModLens 展开配置）手风琴折叠以及本地 MCP 服务状态开关。
 
 ### Diff 审查与应用引擎
 
@@ -61,13 +72,13 @@
 
 ### 视觉一致性与矢量资产
 
-- **全量矢量化图标**：侧栏搜索、视图选项、添加工作区、会话菜单、详情抽屉扳手/关闭/复制、刷新、点赞、点踩、重试、太阳、月亮、显示器、文档、Target 目标、回形针附件、下载导出、播放、暂停等全面接入 SVG 矢量图标，杜绝 Emoji 或文本符号替代。
-- **官方 Harness 视觉回归**：已对照本地 3080 端口官方 Harness 进行全功能视觉与交互审查（对话、轨迹、侧栏、设置模态框、模型选择、Plan 卡片、问题卡片、GoalBar、任务列表、附件输入与日志导出等）。
+- **全量矢量化图标**：侧栏搜索、视图选项、添加工作区、会话菜单、详情抽屉扳手/关闭/复制、刷新、点赞、点踩、重试、太阳、月亮、显示器、文档、Target 目标、回形针附件、下载导出、播放、暂停、Check 勾选等全面接入 SVG 矢量图标，杜绝 Emoji 或文本符号替代。
+- **官方 Harness 视觉回归**：已对照本地 3080 端口官方 Harness 进行全功能视觉与交互审查（对话、轨迹、侧栏、设置模态框、模型选择、Plan 卡片、问题卡片、GoalBar、任务列表、附件输入、日志导出、插件清单、消息反馈等）。
 
 ### 工程交付
 
-- **Windows 独立打包**：`scripts/package_windows.ps1` 可构建并打包包含可执行程序及完整 `assets/` 矢量资源目录的 `DeepSeek-Harness-Desktop-Windows-x64.zip`（~6.22 MB）。
-- **代码质量与测试**：全 workspace 单元测试 48 项全部通过（`cargo test --workspace`），`cargo fmt` 格式化通过，`cargo check -p dsh-ui` 零警告零报错。
+- **Windows 独立打包**：`scripts/package_windows.ps1` 可构建并打包包含可执行程序及完整 `assets/` 矢量资源目录的 `DeepSeek-Harness-Desktop-Windows-x64.zip`（~6.27 MB）。
+- **代码质量与测试**：全 workspace 单元测试 51 项全部通过（`cargo test --workspace`），`cargo fmt` 格式化通过，`cargo check -p dsh-ui` 零警告零报错。
 
 ## 关键实现入口
 
@@ -75,9 +86,9 @@
 | --- | --- |
 | 会话、持久化、Plan 与问题状态、Goal 目标、任务状态、服务端事件、diff 操作、导出格式化 | `crates/dsh-core/src/lib.rs` |
 | unified diff 解析、新建/删除与原子写入 | `crates/dsh-core/src/diff_applier.rs` |
-| 主对话、轨迹、Plan 卡片、问题卡片、GoalBar、任务状态列表、附件栏、消息操作、代码块复制、底栏统计、会话日志导出 | `crates/dsh-ui/src/chat_view.rs` |
+| 主对话、轨迹深度检索过滤、Plan 卡片、问题卡片、GoalBar、任务状态列表、附件栏、消息点赞/点踩与即时复制反馈、代码块复制反馈、底栏统计、会话日志导出 | `crates/dsh-ui/src/chat_view.rs` |
 | 模型目录与提供方分组 | `crates/dsh-ui/src/model_catalog.rs` |
-| 设置模态框、主题选择、预设 2x2 网格、插件管理与 ModLens | `crates/dsh-ui/src/settings_modal.rs` |
+| 设置模态框、主题选择、预设 2x2 网格、插件清单与配置切换、侧边栏卡片偏好、ModLens 与 MCP | `crates/dsh-ui/src/settings_modal.rs` |
 | 侧栏、工作区树、搜索排序、相对时间与会话菜单 | `crates/dsh-ui/src/sidebar.rs`、`crates/dsh-ui/src/dropdown.rs` |
 | 矢量图标体系 | `crates/dsh-ui/src/icons.rs`、`crates/dsh-ui/assets/` |
 | 标题和工作区同步 | `crates/dsh-ui/src/title_bar.rs`、`crates/dsh-ui/src/workspace.rs` |
@@ -85,7 +96,7 @@
 
 ## Git 与验证约定
 
-- 从已同步的 `main` 创建功能分支，沿用命名：`feat/<scope>`、`fix/<scope>` 或 `docs/<scope>`。
+- 从已同步的 `main` 创建功能分支，沿用命名：`feat/<scope>`、`fix/<scope>` 或 `docs/<scope>`。严禁使用 `codex/` 前缀。
 - 功能完成后依次执行：`cargo fmt --check`、`cargo test --workspace`、`cargo check -p dsh-ui`，再检查 `git diff main...HEAD --check`。
 - 合并回 `main` 后推送 `origin/main`。UI 或运行时变更时重新运行 `scripts/package_windows.ps1`，确认 ZIP 存在且非空。
 - 远端仓库：`https://github.com/oliver-xie666/deepseek-harness-desktop-.git`，主分支为 `main`。
