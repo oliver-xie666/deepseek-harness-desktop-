@@ -1,4 +1,4 @@
-use crate::Session;
+﻿use crate::Session;
 use dsh_common::Result;
 use std::fs;
 use std::path::Path;
@@ -80,6 +80,8 @@ mod tests {
             agent_state: None,
             plan_state: None,
             pending_question: None,
+            goal: None,
+            jobs: Vec::new(),
         };
 
         SessionPersistence::save_session(&temp_dir, &session).unwrap();
@@ -106,6 +108,8 @@ mod tests {
             agent_state: None,
             plan_state: None,
             pending_question: None,
+            goal: None,
+            jobs: Vec::new(),
         };
 
         SessionPersistence::save_session(&temp_dir, &make_session("one")).unwrap();

@@ -23,6 +23,7 @@ pub struct SettingsModal {
     pub config: AppConfig,
     pub mcp_servers: Vec<McpServerConfig>,
     pub model_editing: bool,
+    pub modlens_open: bool,
     state: Entity<Arc<AppState>>,
     content_scroll_handle: ScrollHandle,
 }
@@ -47,6 +48,7 @@ impl SettingsModal {
             config,
             mcp_servers,
             model_editing: false,
+            modlens_open: false,
             state,
             content_scroll_handle: ScrollHandle::new(),
         }
@@ -62,6 +64,11 @@ impl SettingsModal {
 
     pub fn set_tab(&mut self, tab: SettingsTab, cx: &mut Context<Self>) {
         self.active_tab = tab;
+        cx.notify();
+    }
+
+    pub fn toggle_modlens(&mut self, cx: &mut Context<Self>) {
+        self.modlens_open = !self.modlens_open;
         cx.notify();
     }
 

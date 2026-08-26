@@ -53,6 +53,12 @@ pub struct ChatView {
     pub active_input_tokens: usize,
     pub active_output_tokens: usize,
     pub active_cache_hit: Option<u8>,
+    pub goal: Option<dsh_protocol::GoalItem>,
+    pub goal_editing: bool,
+    pub goal_draft: String,
+    pub jobs: Vec<dsh_protocol::JobItem>,
+    pub jobs_menu_open: bool,
+    pub attachments: Vec<String>,
     pub plan_active: bool,
     pub plan_markdown: String,
     pub pending_question: Option<dsh_protocol::QuestionItem>,
@@ -145,6 +151,43 @@ fn tool_status_label(status: ToolStatus) -> &'static str {
     }
 }
 
+pub fn goal_phase_label(phase: dsh_protocol::GoalPhase) -> &'static str {
+    match phase {
+        dsh_protocol::GoalPhase::Active => "进行中",
+        dsh_protocol::GoalPhase::Paused => "已暂停",
+        dsh_protocol::GoalPhase::Blocked => "阻塞",
+        dsh_protocol::GoalPhase::Complete => "已完成",
+    }
+}
+
+pub fn goal_phase_color(phase: dsh_protocol::GoalPhase) -> (gpui::Rgba, gpui::Rgba, gpui::Rgba) {
+    match phase {
+        dsh_protocol::GoalPhase::Active => (rgba(0xeff6ffFF), rgba(0xbfdbfeFF), rgba(0x1d4ed8FF)),
+        dsh_protocol::GoalPhase::Paused => (rgba(0xf3f4f6FF), rgba(0xe5e7ebFF), rgba(0x4b5563FF)),
+        dsh_protocol::GoalPhase::Blocked => (rgba(0xfef2f2FF), rgba(0xfecacaFF), rgba(0xb91c1cFF)),
+        dsh_protocol::GoalPhase::Complete => (rgba(0xf0fdf4FF), rgba(0xbbf7d0FF), rgba(0x15803dFF)),
+    }
+}
+
+pub fn job_status_label(status: dsh_protocol::JobStatus) -> &'static str {
+    match status {
+        dsh_protocol::JobStatus::Running => "运行中",
+        dsh_protocol::JobStatus::Stopping => "正在停止",
+        dsh_protocol::JobStatus::Completed => "已完成",
+        dsh_protocol::JobStatus::Killed => "已终止",
+        dsh_protocol::JobStatus::Failed => "失败",
+    }
+}
+
+pub fn job_status_dot_color(status: dsh_protocol::JobStatus) -> gpui::Rgba {
+    match status {
+        dsh_protocol::JobStatus::Running => rgba(0x16803cFF),
+        dsh_protocol::JobStatus::Stopping | dsh_protocol::JobStatus::Killed => rgba(0xb7791fFF),
+        dsh_protocol::JobStatus::Failed => rgba(0xb42318FF),
+        dsh_protocol::JobStatus::Completed => rgba(0x81858cFF),
+    }
+}
+
 fn tool_status_color(status: ToolStatus) -> gpui::Rgba {
     match status {
         ToolStatus::Running => rgba(0xb7791fFF),
@@ -184,6 +227,12 @@ impl ChatView {
             active_input_tokens: 0,
             active_output_tokens: 0,
             active_cache_hit: None,
+            goal: None,
+            goal_editing: false,
+            goal_draft: String::new(),
+            jobs: Vec::new(),
+            jobs_menu_open: false,
+            attachments: Vec::new(),
             plan_active: false,
             plan_markdown: String::new(),
             pending_question: None,
@@ -437,6 +486,8 @@ impl ChatView {
                         .unwrap_or_default();
                     view.streaming_text = text;
                     view.trace_entries = trace_entries;
+                    view.goal = session.goal.clone();
+                    view.jobs = session.jobs.clone();
                     view.plan_active = session
                         .plan_state
                         .as_ref()
@@ -469,6 +520,174 @@ impl ChatView {
         .detach();
 
         view
+    }
+
+    pub fn start_edit_goal(&mut self, cx: &mut Context<Self>) {
+        if let Some(goal) = &self.goal {
+            self.goal_draft = goal.objective.clone();
+            self.goal_editing = true;
+            cx.notify();
+        }
+    }
+
+    pub fn save_edit_goal(&mut self, cx: &mut Context<Self>) {
+        let trimmed = self.goal_draft.trim().to_string();
+        if trimmed.is_empty() {
+            return;
+        }
+        if let Some(session_id) = self.active_session_id.clone() {
+            let state = self.state.read(cx).clone();
+            let phase = self
+                .goal
+                .as_ref()
+                .map(|g| g.phase)
+                .unwrap_or(dsh_protocol::GoalPhase::Active);
+            self.goal_editing = false;
+            tokio::spawn(async move {
+                let _ = state.update_goal(&session_id, &trimmed, phase).await;
+            });
+            cx.notify();
+        }
+    }
+
+    pub fn cancel_edit_goal(&mut self, cx: &mut Context<Self>) {
+        self.goal_editing = false;
+        cx.notify();
+    }
+
+    pub fn toggle_goal_pause(&mut self, cx: &mut Context<Self>) {
+        if let Some(goal) = &self.goal {
+            let next_phase = match goal.phase {
+                dsh_protocol::GoalPhase::Active => dsh_protocol::GoalPhase::Paused,
+                dsh_protocol::GoalPhase::Paused => dsh_protocol::GoalPhase::Active,
+                dsh_protocol::GoalPhase::Blocked => dsh_protocol::GoalPhase::Active,
+                dsh_protocol::GoalPhase::Complete => dsh_protocol::GoalPhase::Complete,
+            };
+            if let Some(session_id) = self.active_session_id.clone() {
+                let state = self.state.read(cx).clone();
+                let objective = goal.objective.clone();
+                tokio::spawn(async move {
+                    let _ = state.update_goal(&session_id, &objective, next_phase).await;
+                });
+                cx.notify();
+            }
+        }
+    }
+
+    pub fn clear_goal(&mut self, cx: &mut Context<Self>) {
+        if let Some(session_id) = self.active_session_id.clone() {
+            let state = self.state.read(cx).clone();
+            self.goal = None;
+            tokio::spawn(async move {
+                let _ = state.clear_goal(&session_id).await;
+            });
+            cx.notify();
+        }
+    }
+
+    pub fn toggle_jobs_menu(&mut self, cx: &mut Context<Self>) {
+        self.jobs_menu_open = !self.jobs_menu_open;
+        if self.jobs_menu_open {
+            self.permission_open = false;
+            self.model_open = false;
+            self.plus_menu_open = false;
+        }
+        cx.notify();
+    }
+
+    pub fn kill_job(&mut self, job_id: &str, cx: &mut Context<Self>) {
+        if let Some(session_id) = self.active_session_id.clone() {
+            let state = self.state.read(cx).clone();
+            let j_id = job_id.to_string();
+            tokio::spawn(async move {
+                let _ = state.kill_job(&session_id, &j_id).await;
+            });
+            cx.notify();
+        }
+    }
+
+    pub fn add_attachment_dialog(&mut self, cx: &mut Context<Self>) {
+        let paths_receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some("选择附加文件或图片".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = paths_receiver.await else {
+                return;
+            };
+            let _ = this.update(cx, |view, cx| {
+                for path in paths {
+                    let path_str = path.to_string_lossy().to_string();
+                    if !view.attachments.contains(&path_str) {
+                        view.attachments.push(path_str);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub fn remove_attachment(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index < self.attachments.len() {
+            self.attachments.remove(index);
+            cx.notify();
+        }
+    }
+
+    pub fn export_session_markdown_action(&mut self, cx: &mut Context<Self>) {
+        if let Some(session_id) = &self.active_session_id {
+            let state = self.state.read(cx).clone();
+            let sid = session_id.clone();
+            let state_arc = state.clone();
+            cx.spawn(async move |this, cx| {
+                let sessions = state_arc.sessions.read().await;
+                if let Some(session) = sessions.get(&sid) {
+                    let md = dsh_core::AppState::export_session_markdown(session);
+                    let filename = format!("session-{}.md", session.id);
+                    let target_path =
+                        std::path::PathBuf::from(&session.workspace_path).join(&filename);
+                    let _ = std::fs::write(&target_path, &md);
+                    drop(sessions);
+                    let _ = this.update(cx, |view, cx| {
+                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(md));
+                        view.session_log_lines
+                            .push(format!("已导出会话记录至: {}", target_path.display()));
+                        cx.notify();
+                    });
+                }
+            })
+            .detach();
+        }
+    }
+
+    pub fn export_session_json_action(&mut self, cx: &mut Context<Self>) {
+        if let Some(session_id) = &self.active_session_id {
+            let state = self.state.read(cx).clone();
+            let sid = session_id.clone();
+            let state_arc = state.clone();
+            cx.spawn(async move |this, cx| {
+                let sessions = state_arc.sessions.read().await;
+                if let Some(session) = sessions.get(&sid) {
+                    if let Ok(json) = dsh_core::AppState::export_session_json(session) {
+                        let filename = format!("session-{}.json", session.id);
+                        let target_path =
+                            std::path::PathBuf::from(&session.workspace_path).join(&filename);
+                        let _ = std::fs::write(&target_path, &json);
+                        drop(sessions);
+                        let _ = this.update(cx, |view, cx| {
+                            cx.write_to_clipboard(gpui::ClipboardItem::new_string(json));
+                            view.session_log_lines
+                                .push(format!("已导出会话记录至: {}", target_path.display()));
+                            cx.notify();
+                        });
+                    }
+                }
+            })
+            .detach();
+        }
     }
 
     pub fn exit_plan_mode(&mut self, cx: &mut Context<Self>) {
@@ -875,6 +1094,7 @@ impl ChatView {
                             .child(self.workspace_selector.clone())
                             .child(self.preset_selector.clone()),
                     )
+                    .child(self.render_goal_bar(cx))
                     .child(
                         div()
                             .w_full()
@@ -890,6 +1110,7 @@ impl ChatView {
                             .flex()
                             .flex_col()
                             .justify_between()
+                            .child(self.render_attachments_bar(cx))
                             .child(self.text_input.clone())
                             .child(
                                 div()
@@ -903,7 +1124,26 @@ impl ChatView {
                                             .items_center()
                                             .gap_2()
                                             .child(self.render_plus_button(cx))
+                                            .child(
+                                                div()
+                                                    .size(px(28.0))
+                                                    .rounded_full()
+                                                    .bg(rgb(0xf1f3f5))
+                                                    .hover(|s| s.bg(rgb(0xe9edf2)))
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .cursor_pointer()
+                                                    .on_mouse_down(
+                                                        gpui::MouseButton::Left,
+                                                        cx.listener(|this, _, _, cx| {
+                                                            this.add_attachment_dialog(cx)
+                                                        }),
+                                                    )
+                                                    .child(icons::paperclip(14.0, rgb(0x61666b))),
+                                            )
                                             .child(self.render_access_selector(cx))
+                                            .child(self.render_jobs_action(cx))
                                             .when(self.plan_active, |this| {
                                                 this.child(self.render_plan_chip(cx))
                                             }),
@@ -981,21 +1221,73 @@ impl ChatView {
                     )
                     .child(
                         div()
-                            .px_2p5()
-                            .py_1()
-                            .rounded(px(8.0))
-                            .border_1()
-                            .border_color(rgb(0xe1e5eb))
-                            .text_xs()
-                            .text_color(rgb(0x61666b))
-                            .hover(|s| s.bg(rgb(0xf1f3f5)))
-                            .cursor_pointer()
-                            .on_mouse_down(gpui::MouseButton::Left, handle_log)
-                            .child(if self.session_log_open {
-                                "Session log ↑"
-                            } else {
-                                "Session log ↓"
-                            }),
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .px_2p5()
+                                    .py_1()
+                                    .rounded(px(8.0))
+                                    .border_1()
+                                    .border_color(rgb(0xe1e5eb))
+                                    .text_xs()
+                                    .text_color(rgb(0x61666b))
+                                    .hover(|s| s.bg(rgb(0xf1f3f5)))
+                                    .cursor_pointer()
+                                    .on_mouse_down(
+                                        gpui::MouseButton::Left,
+                                        cx.listener(|this, _, _, cx| {
+                                            this.export_session_markdown_action(cx)
+                                        }),
+                                    )
+                                    .child(icons::download(12.0, rgb(0x61666b)))
+                                    .child("导出 Markdown"),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .px_2p5()
+                                    .py_1()
+                                    .rounded(px(8.0))
+                                    .border_1()
+                                    .border_color(rgb(0xe1e5eb))
+                                    .text_xs()
+                                    .text_color(rgb(0x61666b))
+                                    .hover(|s| s.bg(rgb(0xf1f3f5)))
+                                    .cursor_pointer()
+                                    .on_mouse_down(
+                                        gpui::MouseButton::Left,
+                                        cx.listener(|this, _, _, cx| {
+                                            this.export_session_json_action(cx)
+                                        }),
+                                    )
+                                    .child(icons::download(12.0, rgb(0x61666b)))
+                                    .child("导出 JSON"),
+                            )
+                            .child(
+                                div()
+                                    .px_2p5()
+                                    .py_1()
+                                    .rounded(px(8.0))
+                                    .border_1()
+                                    .border_color(rgb(0xe1e5eb))
+                                    .text_xs()
+                                    .text_color(rgb(0x61666b))
+                                    .hover(|s| s.bg(rgb(0xf1f3f5)))
+                                    .cursor_pointer()
+                                    .on_mouse_down(gpui::MouseButton::Left, handle_log)
+                                    .child(if self.session_log_open {
+                                        "Session log ↑"
+                                    } else {
+                                        "Session log ↓"
+                                    }),
+                            ),
                     ),
             )
             .when(self.session_log_open, |this| {
@@ -1011,7 +1303,51 @@ impl ChatView {
                         .gap_1()
                         .text_xs()
                         .text_color(rgb(0x61666b))
-                        .child(format!("Session log · {} 行", self.session_log_lines.len()))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .child(format!("Session log · {} 行", self.session_log_lines.len()))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap_1()
+                                                .cursor_pointer()
+                                                .hover(|s| s.text_color(rgb(0x3964fe)))
+                                                .on_mouse_down(
+                                                    gpui::MouseButton::Left,
+                                                    cx.listener(|this, _, _, cx| {
+                                                        this.export_session_markdown_action(cx)
+                                                    }),
+                                                )
+                                                .child(icons::download(11.0, rgb(0x61666b)))
+                                                .child("保存 Markdown"),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap_1()
+                                                .cursor_pointer()
+                                                .hover(|s| s.text_color(rgb(0x3964fe)))
+                                                .on_mouse_down(
+                                                    gpui::MouseButton::Left,
+                                                    cx.listener(|this, _, _, cx| {
+                                                        this.export_session_json_action(cx)
+                                                    }),
+                                                )
+                                                .child(icons::download(11.0, rgb(0x61666b)))
+                                                .child("保存 JSON"),
+                                        ),
+                                ),
+                        )
                         .child(
                             div()
                                 .id("session-log-content")
@@ -1089,6 +1425,372 @@ impl ChatView {
                             .child("轨迹"),
                     ),
             )
+    }
+
+    fn render_goal_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let goal = match &self.goal {
+            Some(g) if g.phase != dsh_protocol::GoalPhase::Complete => g.clone(),
+            _ => return div().into_any_element(),
+        };
+
+        let is_editing = self.goal_editing;
+        let handle_edit_start = cx.listener(|this, _, _, cx| this.start_edit_goal(cx));
+        let handle_edit_save = cx.listener(|this, _, _, cx| this.save_edit_goal(cx));
+        let handle_edit_cancel = cx.listener(|this, _, _, cx| this.cancel_edit_goal(cx));
+        let handle_pause_toggle = cx.listener(|this, _, _, cx| this.toggle_goal_pause(cx));
+        let handle_clear = cx.listener(|this, _, _, cx| this.clear_goal(cx));
+
+        let (bg, border, text_color) = goal_phase_color(goal.phase);
+        let phase_text = goal_phase_label(goal.phase);
+
+        div()
+            .w_full()
+            .max_w(px(776.0))
+            .mb_2()
+            .px_3()
+            .py_1p5()
+            .rounded_xl()
+            .bg(bg)
+            .border_1()
+            .border_color(border)
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .flex_1()
+                    .overflow_hidden()
+                    .child(icons::target(15.0, text_color))
+                    .child(
+                        div()
+                            .px_1p5()
+                            .py_0p5()
+                            .rounded_md()
+                            .bg(rgba(0xffffff88))
+                            .text_xs()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(text_color)
+                            .child(format!("目标 ({})", phase_text)),
+                    )
+                    .child(if is_editing {
+                        div()
+                            .flex_1()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(rgb(0x1f2937))
+                                    .child(format!("编辑中: {}", self.goal_draft)),
+                            )
+                            .into_any_element()
+                    } else {
+                        div()
+                            .text_xs()
+                            .text_color(rgb(0x1f2937))
+                            .overflow_hidden()
+                            .child(goal.objective.clone())
+                            .into_any_element()
+                    }),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1p5()
+                    .when(is_editing, |this| {
+                        this.child(
+                            div()
+                                .px_2()
+                                .py_0p5()
+                                .rounded_md()
+                                .bg(rgb(0x3964fe))
+                                .text_xs()
+                                .text_color(rgb(0xffffff))
+                                .cursor_pointer()
+                                .on_mouse_down(gpui::MouseButton::Left, handle_edit_save)
+                                .child("保存"),
+                        )
+                        .child(
+                            div()
+                                .px_2()
+                                .py_0p5()
+                                .rounded_md()
+                                .bg(rgb(0xe5e7eb))
+                                .text_xs()
+                                .text_color(rgb(0x374151))
+                                .cursor_pointer()
+                                .on_mouse_down(gpui::MouseButton::Left, handle_edit_cancel)
+                                .child("取消"),
+                        )
+                    })
+                    .when(!is_editing, |this| {
+                        this.child(
+                            div()
+                                .p_1()
+                                .rounded_md()
+                                .hover(|s| s.bg(rgba(0x00000010)))
+                                .cursor_pointer()
+                                .on_mouse_down(gpui::MouseButton::Left, handle_pause_toggle)
+                                .child(if goal.phase == dsh_protocol::GoalPhase::Paused {
+                                    icons::play(13.0, rgb(0x4b5563)).into_any_element()
+                                } else {
+                                    icons::pause(13.0, rgb(0x4b5563)).into_any_element()
+                                }),
+                        )
+                        .child(
+                            div()
+                                .p_1()
+                                .rounded_md()
+                                .hover(|s| s.bg(rgba(0x00000010)))
+                                .cursor_pointer()
+                                .on_mouse_down(gpui::MouseButton::Left, handle_edit_start)
+                                .child(icons::wrench(13.0, rgb(0x4b5563))),
+                        )
+                        .child(
+                            div()
+                                .p_1()
+                                .rounded_md()
+                                .hover(|s| s.bg(rgba(0x00000010)))
+                                .cursor_pointer()
+                                .on_mouse_down(gpui::MouseButton::Left, handle_clear)
+                                .child(icons::close(13.0, rgb(0x6b7280))),
+                        )
+                    }),
+            )
+            .into_any_element()
+    }
+
+    fn render_jobs_action(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.jobs.is_empty() {
+            return div().into_any_element();
+        }
+
+        let handle_toggle = cx.listener(|this, _, _, cx| this.toggle_jobs_menu(cx));
+        let is_open = self.jobs_menu_open;
+
+        let has_running = self
+            .jobs
+            .iter()
+            .any(|j| j.status == dsh_protocol::JobStatus::Running);
+        let has_warning = self.jobs.iter().any(|j| {
+            matches!(
+                j.status,
+                dsh_protocol::JobStatus::Stopping | dsh_protocol::JobStatus::Killed
+            )
+        });
+        let has_failed = self
+            .jobs
+            .iter()
+            .any(|j| j.status == dsh_protocol::JobStatus::Failed);
+
+        let dot_color = if has_running {
+            rgba(0x16803cFF)
+        } else if has_failed {
+            rgba(0xb42318FF)
+        } else if has_warning {
+            rgba(0xb7791fFF)
+        } else {
+            rgba(0x81858cFF)
+        };
+
+        div()
+            .relative()
+            .child(
+                div()
+                    .h(px(28.0))
+                    .flex()
+                    .items_center()
+                    .gap_1p5()
+                    .px_2()
+                    .rounded_md()
+                    .hover(|s| s.bg(rgb(0xf1f3f5)))
+                    .cursor_pointer()
+                    .on_mouse_down(gpui::MouseButton::Left, handle_toggle)
+                    .child(div().size(px(6.0)).rounded_full().bg(dot_color))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(0x3f454d))
+                            .child(format!("{} 项任务", self.jobs.len())),
+                    )
+                    .child(icons::chevron_down(12.0, rgb(0x81858c))),
+            )
+            .when(is_open, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .bottom(px(34.0))
+                        .left(px(0.0))
+                        .w(px(336.0))
+                        .p_2()
+                        .rounded_xl()
+                        .bg(rgb(0xffffff))
+                        .border_1()
+                        .border_color(rgb(0xe1e5eb))
+                        .shadow_lg()
+                        .flex()
+                        .flex_col()
+                        .gap_1p5()
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .pb_1()
+                                .border_b_1()
+                                .border_color(rgb(0xf1f3f5))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(rgb(0x374151))
+                                        .child("后台任务列表"),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(rgb(0x9ca3af))
+                                        .child(format!("共 {} 项", self.jobs.len())),
+                                ),
+                        )
+                        .children(self.jobs.iter().map(|job| {
+                            let status_dot = job_status_dot_color(job.status);
+                            let status_text = job_status_label(job.status);
+                            let dur_str = format_duration_metric(job.duration_ms.unwrap_or(0));
+                            let job_id = job.id.clone();
+                            let is_running = job.status == dsh_protocol::JobStatus::Running;
+                            let handle_kill = cx.listener(move |this, _, _, cx| {
+                                this.kill_job(&job_id, cx);
+                            });
+
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .p_1p5()
+                                .rounded_lg()
+                                .hover(|s| s.bg(rgb(0xf9fafb)))
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1p5()
+                                        .flex_1()
+                                        .overflow_hidden()
+                                        .child(div().size(px(6.0)).rounded_full().bg(status_dot))
+                                        .child(
+                                            div()
+                                                .px_1()
+                                                .rounded(px(3.0))
+                                                .bg(rgb(0xf3f4f6))
+                                                .text_xs()
+                                                .text_color(rgb(0x6b7280))
+                                                .child(job.kind.clone()),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(rgb(0x1f2937))
+                                                .overflow_hidden()
+                                                .child(job.label.clone()),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap_1p5()
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(rgb(0x9ca3af))
+                                                .child(status_text),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(rgb(0x6b7280))
+                                                .child(dur_str),
+                                        )
+                                        .when(is_running, |this| {
+                                            this.child(
+                                                div()
+                                                    .size(px(18.0))
+                                                    .rounded_full()
+                                                    .hover(|s| s.bg(rgb(0xfee2e2)))
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_center()
+                                                    .cursor_pointer()
+                                                    .on_mouse_down(
+                                                        gpui::MouseButton::Left,
+                                                        handle_kill,
+                                                    )
+                                                    .child(icons::close(10.0, rgb(0xef4444))),
+                                            )
+                                        }),
+                                )
+                        })),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn render_attachments_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.attachments.is_empty() {
+            return div().into_any_element();
+        }
+
+        div()
+            .w_full()
+            .flex()
+            .flex_wrap()
+            .gap_1p5()
+            .pb_2()
+            .children(self.attachments.iter().enumerate().map(|(idx, path)| {
+                let filename = std::path::Path::new(path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(path.as_str())
+                    .to_string();
+                let handle_remove = cx.listener(move |this, _, _, cx| {
+                    this.remove_attachment(idx, cx);
+                });
+
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1p5()
+                    .px_2()
+                    .py_1()
+                    .rounded_lg()
+                    .bg(rgb(0xf1f3f5))
+                    .border_1()
+                    .border_color(rgb(0xe1e5eb))
+                    .child(icons::paperclip(12.0, rgb(0x61666b)))
+                    .child(div().text_xs().text_color(rgb(0x374151)).child(filename))
+                    .child(
+                        div()
+                            .size(px(14.0))
+                            .rounded_full()
+                            .hover(|s| s.bg(rgb(0xe5e7eb)))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .cursor_pointer()
+                            .on_mouse_down(gpui::MouseButton::Left, handle_remove)
+                            .child(icons::close(8.0, rgb(0x6b7280))),
+                    )
+            }))
+            .into_any_element()
     }
 
     fn render_plan_chip(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -2021,6 +2723,7 @@ impl Render for ChatView {
                         .flex()
                         .flex_col()
                         .items_center()
+                        .child(self.render_goal_bar(cx))
                         .child(
                             div()
                                 .max_w(px(776.0))
@@ -2033,6 +2736,7 @@ impl Render for ChatView {
                                 .flex()
                                 .flex_col()
                                 .gap_2()
+                                .child(self.render_attachments_bar(cx))
                                 .child(self.text_input.clone())
                                 .child(
                                     div()
@@ -2045,7 +2749,32 @@ impl Render for ChatView {
                                                 .items_center()
                                                 .gap_2()
                                                 .child(self.render_plus_button(cx))
-                                                .child(self.render_access_selector(cx)),
+                                                .child(
+                                                    div()
+                                                        .size(px(28.0))
+                                                        .rounded_full()
+                                                        .bg(rgb(0xf1f3f5))
+                                                        .hover(|s| s.bg(rgb(0xe9edf2)))
+                                                        .flex()
+                                                        .items_center()
+                                                        .justify_center()
+                                                        .cursor_pointer()
+                                                        .on_mouse_down(
+                                                            gpui::MouseButton::Left,
+                                                            cx.listener(|this, _, _, cx| {
+                                                                this.add_attachment_dialog(cx)
+                                                            }),
+                                                        )
+                                                        .child(icons::paperclip(
+                                                            14.0,
+                                                            rgb(0x61666b),
+                                                        )),
+                                                )
+                                                .child(self.render_access_selector(cx))
+                                                .child(self.render_jobs_action(cx))
+                                                .when(self.plan_active, |this| {
+                                                    this.child(self.render_plan_chip(cx))
+                                                }),
                                         )
                                         .child(
                                             div()
@@ -2263,5 +2992,36 @@ mod plan_and_question_tests {
         );
         toggle(&mut selected, "Option A", true);
         assert_eq!(selected, vec!["Option B".to_string()]);
+    }
+}
+
+#[cfg(test)]
+mod goal_and_jobs_ui_tests {
+    use super::*;
+
+    #[test]
+    fn test_goal_phase_labels() {
+        assert_eq!(goal_phase_label(dsh_protocol::GoalPhase::Active), "进行中");
+        assert_eq!(goal_phase_label(dsh_protocol::GoalPhase::Paused), "已暂停");
+        assert_eq!(goal_phase_label(dsh_protocol::GoalPhase::Blocked), "阻塞");
+        assert_eq!(
+            goal_phase_label(dsh_protocol::GoalPhase::Complete),
+            "已完成"
+        );
+    }
+
+    #[test]
+    fn test_job_status_labels() {
+        assert_eq!(job_status_label(dsh_protocol::JobStatus::Running), "运行中");
+        assert_eq!(
+            job_status_label(dsh_protocol::JobStatus::Stopping),
+            "正在停止"
+        );
+        assert_eq!(
+            job_status_label(dsh_protocol::JobStatus::Completed),
+            "已完成"
+        );
+        assert_eq!(job_status_label(dsh_protocol::JobStatus::Killed), "已终止");
+        assert_eq!(job_status_label(dsh_protocol::JobStatus::Failed), "失败");
     }
 }

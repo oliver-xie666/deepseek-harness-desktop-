@@ -9,7 +9,8 @@ use chrono::{DateTime, Utc};
 use dsh_common::{AppPaths, Result};
 use dsh_daemon::{DaemonConfig, DaemonManager};
 use dsh_protocol::{
-    AgentState, HarnessClientMessage, HarnessServerEvent, PlanState, QuestionItem, ToolStatus,
+    AgentState, GoalItem, GoalPhase, HarnessClientMessage, HarnessServerEvent, JobItem, JobStatus,
+    PlanState, QuestionItem, ToolStatus,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -76,6 +77,10 @@ pub struct Session {
     pub plan_state: Option<PlanState>,
     #[serde(default)]
     pub pending_question: Option<QuestionItem>,
+    #[serde(default)]
+    pub goal: Option<GoalItem>,
+    #[serde(default)]
+    pub jobs: Vec<JobItem>,
 }
 
 fn default_session_time() -> DateTime<Utc> {
@@ -146,6 +151,8 @@ impl AppState {
             agent_state: Some(AgentState::Idle),
             plan_state: None,
             pending_question: None,
+            goal: None,
+            jobs: Vec::new(),
         };
 
         self.sessions
@@ -293,6 +300,51 @@ impl AppState {
     }
 
     pub async fn add_user_message(&self, session_id: &str, text: &str) -> Result<()> {
+        self.add_user_message_with_attachments(session_id, text, Vec::new())
+            .await
+    }
+
+    pub async fn add_user_message_with_attachments(
+        &self,
+        session_id: &str,
+        text: &str,
+        attachments: Vec<String>,
+    ) -> Result<()> {
+        let mut full_content = text.to_string();
+        if !attachments.is_empty() {
+            full_content.push_str("\n\n**附件:**\n");
+            for att in &attachments {
+                full_content.push_str(&format!("- `{}`\n", att));
+            }
+        }
+        let msg = ChatMessage {
+            id: Uuid::new_v4().to_string(),
+            sender: MessageSender::User,
+            content: full_content,
+            tool_calls: Vec::new(),
+            created_at: Utc::now(),
+        };
+
+        if let Some(session) = self.sessions.write().await.get_mut(session_id) {
+            session.messages.push(msg);
+            session.updated_at = Utc::now();
+            let _ = SessionPersistence::save_session(&AppPaths::data_dir(), session);
+        }
+
+        self.outbox_tx
+            .send(HarnessClientMessage::SendPrompt {
+                session_id: session_id.to_string(),
+                text: text.to_string(),
+                attachments,
+            })
+            .await
+            .map_err(|e| dsh_common::DshError::Other(e.to_string()))?;
+
+        Ok(())
+    }
+
+    #[doc(hidden)]
+    pub async fn _legacy_add_user_message(&self, session_id: &str, text: &str) -> Result<()> {
         let msg = ChatMessage {
             id: Uuid::new_v4().to_string(),
             sender: MessageSender::User,
@@ -361,6 +413,153 @@ impl AppState {
                 .map(|session| session.id.clone());
             *self.active_session_id.write().await = active;
         }
+    }
+
+    pub async fn update_goal(
+        &self,
+        session_id: &str,
+        objective: &str,
+        phase: GoalPhase,
+    ) -> Result<()> {
+        {
+            let mut sessions = self.sessions.write().await;
+            if let Some(session) = sessions.get_mut(session_id) {
+                let goal_id = session
+                    .goal
+                    .as_ref()
+                    .map(|g| g.id.clone())
+                    .unwrap_or_else(|| Uuid::new_v4().to_string());
+                session.goal = Some(GoalItem {
+                    id: goal_id,
+                    objective: objective.to_string(),
+                    phase,
+                    error: None,
+                });
+                session.updated_at = Utc::now();
+            }
+        }
+        let _ = self
+            .outbox_tx
+            .send(HarnessClientMessage::UpdateGoal {
+                session_id: session_id.to_string(),
+                objective: objective.to_string(),
+                phase,
+            })
+            .await;
+        Ok(())
+    }
+
+    pub async fn clear_goal(&self, session_id: &str) -> Result<()> {
+        {
+            let mut sessions = self.sessions.write().await;
+            if let Some(session) = sessions.get_mut(session_id) {
+                session.goal = None;
+                session.updated_at = Utc::now();
+            }
+        }
+        let _ = self
+            .outbox_tx
+            .send(HarnessClientMessage::ClearGoal {
+                session_id: session_id.to_string(),
+            })
+            .await;
+        Ok(())
+    }
+
+    pub async fn kill_job(&self, session_id: &str, job_id: &str) -> Result<()> {
+        {
+            let mut sessions = self.sessions.write().await;
+            if let Some(session) = sessions.get_mut(session_id) {
+                if let Some(job) = session.jobs.iter_mut().find(|j| j.id == job_id) {
+                    job.status = JobStatus::Stopping;
+                }
+                session.updated_at = Utc::now();
+            }
+        }
+        let _ = self
+            .outbox_tx
+            .send(HarnessClientMessage::KillJob {
+                session_id: session_id.to_string(),
+                job_id: job_id.to_string(),
+            })
+            .await;
+        Ok(())
+    }
+
+    pub fn export_session_markdown(session: &Session) -> String {
+        let mut md = String::new();
+        md.push_str(&format!("# 会话导出: {}\n\n", session.title));
+        md.push_str(&format!("- **会话 ID**: `{}`\n", session.id));
+        md.push_str(&format!("- **工作区**: `{}`\n", session.workspace_path));
+        md.push_str(&format!(
+            "- **创建时间**: {}\n",
+            session.created_at.to_rfc3339()
+        ));
+        md.push_str(&format!(
+            "- **更新时间**: {}\n\n",
+            session.updated_at.to_rfc3339()
+        ));
+
+        if let Some(goal) = &session.goal {
+            let phase_str = match goal.phase {
+                GoalPhase::Active => "进行中",
+                GoalPhase::Paused => "已暂停",
+                GoalPhase::Blocked => "阻塞",
+                GoalPhase::Complete => "已完成",
+            };
+            md.push_str(&format!("## 目标: {} ({})\n\n", goal.objective, phase_str));
+        }
+
+        if let Some(plan) = &session.plan_state {
+            if plan.active && !plan.plan_markdown.is_empty() {
+                md.push_str("## 规划 (Plan)\n\n");
+                md.push_str(&plan.plan_markdown);
+                md.push_str("\n\n");
+            }
+        }
+
+        md.push_str("## 消息记录\n\n");
+        for msg in &session.messages {
+            let sender = match msg.sender {
+                MessageSender::User => "🧑 **User**",
+                MessageSender::Assistant => "🤖 **Assistant**",
+                MessageSender::System => "⚙️ **System**",
+            };
+            md.push_str(&format!("### {}\n\n", sender));
+            md.push_str(&msg.content);
+            md.push_str("\n\n");
+
+            if !msg.tool_calls.is_empty() {
+                md.push_str("#### 工具调用\n\n");
+                for tc in &msg.tool_calls {
+                    md.push_str(&format!(
+                        "- **`{}`** (耗时 {}ms, 状态: {:?})\n",
+                        tc.tool_name, tc.duration_ms, tc.status
+                    ));
+                    md.push_str("  ```json\n");
+                    md.push_str(&format!("  // Input\n  {}\n", tc.input));
+                    if let Some(out) = &tc.output {
+                        md.push_str(&format!("  // Output\n  {}\n", out));
+                    }
+                    md.push_str("  ```\n\n");
+                }
+            }
+        }
+
+        if !session.terminal_logs.is_empty() {
+            md.push_str("## 终端执行日志\n\n```text\n");
+            for log in &session.terminal_logs {
+                md.push_str(log);
+                md.push('\n');
+            }
+            md.push_str("```\n");
+        }
+
+        md
+    }
+
+    pub fn export_session_json(session: &Session) -> serde_json::Result<String> {
+        serde_json::to_string_pretty(session)
     }
 
     pub async fn handle_server_event(&self, event: HarnessServerEvent) {
@@ -516,6 +715,37 @@ impl AppState {
                     None
                 }
             }
+            HarnessServerEvent::GoalUpdate { session_id, goal } => {
+                if let Some(session) = self.sessions.write().await.get_mut(&session_id) {
+                    session.goal = goal;
+                    session.updated_at = Utc::now();
+                    Some(session.clone())
+                } else {
+                    None
+                }
+            }
+            HarnessServerEvent::JobUpdate { session_id, job } => {
+                if let Some(session) = self.sessions.write().await.get_mut(&session_id) {
+                    if let Some(idx) = session.jobs.iter().position(|j| j.id == job.id) {
+                        session.jobs[idx] = job;
+                    } else {
+                        session.jobs.push(job);
+                    }
+                    session.updated_at = Utc::now();
+                    Some(session.clone())
+                } else {
+                    None
+                }
+            }
+            HarnessServerEvent::JobListUpdate { session_id, jobs } => {
+                if let Some(session) = self.sessions.write().await.get_mut(&session_id) {
+                    session.jobs = jobs;
+                    session.updated_at = Utc::now();
+                    Some(session.clone())
+                } else {
+                    None
+                }
+            }
             HarnessServerEvent::TerminalLog {
                 session_id, line, ..
             } => {
@@ -660,6 +890,80 @@ mod tests {
                 question_id: "q-1".into(),
                 selected: vec!["Mode A".into()],
                 custom_text: None,
+            }
+        );
+
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_goal_and_job_events_and_export() {
+        let temp_dir = std::env::temp_dir().join(format!("dsh_test_goal_{}", uuid::Uuid::new_v4()));
+        let (state, mut outbox_rx) =
+            AppState::new_with_storage(DaemonConfig::default(), temp_dir.clone());
+        let session_id = state.create_session("Goal Session", "/tmp").await;
+
+        state
+            .handle_server_event(HarnessServerEvent::GoalUpdate {
+                session_id: session_id.clone(),
+                goal: Some(GoalItem {
+                    id: "g-1".into(),
+                    objective: "Test objective".into(),
+                    phase: GoalPhase::Active,
+                    error: None,
+                }),
+            })
+            .await;
+
+        let sessions = state.sessions.read().await;
+        let session = sessions.get(&session_id).unwrap();
+        assert_eq!(session.goal.as_ref().unwrap().objective, "Test objective");
+        drop(sessions);
+
+        state
+            .handle_server_event(HarnessServerEvent::JobUpdate {
+                session_id: session_id.clone(),
+                job: JobItem {
+                    id: "j-1".into(),
+                    kind: "agent".into(),
+                    label: "code-worker".into(),
+                    status: JobStatus::Running,
+                    started_at: Utc::now(),
+                    duration_ms: Some(2500),
+                },
+            })
+            .await;
+
+        let sessions = state.sessions.read().await;
+        let session = sessions.get(&session_id).unwrap();
+        assert_eq!(session.jobs.len(), 1);
+        assert_eq!(session.jobs[0].label, "code-worker");
+
+        // Test markdown & json export
+        let md = AppState::export_session_markdown(session);
+        assert!(md.contains("# 会话导出: Goal Session"));
+        assert!(md.contains("## 目标: Test objective (进行中)"));
+
+        let json = AppState::export_session_json(session).unwrap();
+        assert!(json.contains("Test objective"));
+        drop(sessions);
+
+        state.clear_goal(&session_id).await.unwrap();
+        let msg = outbox_rx.try_recv().unwrap();
+        assert_eq!(
+            msg,
+            HarnessClientMessage::ClearGoal {
+                session_id: session_id.clone()
+            }
+        );
+
+        state.kill_job(&session_id, "j-1").await.unwrap();
+        let msg2 = outbox_rx.try_recv().unwrap();
+        assert_eq!(
+            msg2,
+            HarnessClientMessage::KillJob {
+                session_id: session_id.clone(),
+                job_id: "j-1".into()
             }
         );
 

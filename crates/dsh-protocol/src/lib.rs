@@ -34,6 +34,16 @@ pub enum HarnessClientMessage {
         #[serde(default)]
         custom_text: Option<String>,
     },
+    /// Update or change session goal
+    UpdateGoal {
+        session_id: String,
+        objective: String,
+        phase: GoalPhase,
+    },
+    /// Clear or remove session goal
+    ClearGoal { session_id: String },
+    /// Stop or kill background job
+    KillJob { session_id: String, job_id: String },
     /// Ping daemon for health status
     Ping,
 }
@@ -94,6 +104,18 @@ pub enum HarnessServerEvent {
         options: Vec<String>,
         multi_select: bool,
     },
+    /// Goal status or objective update
+    GoalUpdate {
+        session_id: String,
+        goal: Option<GoalItem>,
+    },
+    /// Single job status update
+    JobUpdate { session_id: String, job: JobItem },
+    /// Full job list snapshot update
+    JobListUpdate {
+        session_id: String,
+        jobs: Vec<JobItem>,
+    },
     /// Realtime terminal/shell execution log
     TerminalLog {
         session_id: String,
@@ -123,6 +145,46 @@ pub enum AgentState {
     WaitingForApproval,
     Completed,
     Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalPhase {
+    Active,
+    Paused,
+    Blocked,
+    Complete,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GoalItem {
+    pub id: String,
+    pub objective: String,
+    pub phase: GoalPhase,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobStatus {
+    Running,
+    Stopping,
+    Completed,
+    Killed,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JobItem {
+    pub id: String,
+    pub kind: String,
+    pub label: String,
+    pub status: JobStatus,
+    #[serde(default = "Utc::now")]
+    pub started_at: DateTime<Utc>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -190,6 +252,26 @@ mod tests {
     }
 
     #[test]
+    fn test_client_goal_and_job_roundtrip() {
+        let goal_msg = HarnessClientMessage::UpdateGoal {
+            session_id: "sess-123".into(),
+            objective: "Build parity".into(),
+            phase: GoalPhase::Active,
+        };
+        let json = serde_json::to_string(&goal_msg).unwrap();
+        let parsed: HarnessClientMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(goal_msg, parsed);
+
+        let kill_msg = HarnessClientMessage::KillJob {
+            session_id: "sess-123".into(),
+            job_id: "job-1".into(),
+        };
+        let json2 = serde_json::to_string(&kill_msg).unwrap();
+        let parsed2: HarnessClientMessage = serde_json::from_str(&json2).unwrap();
+        assert_eq!(kill_msg, parsed2);
+    }
+
+    #[test]
     fn test_server_event_roundtrip() {
         let event = HarnessServerEvent::TokenChunk {
             session_id: "sess-123".to_string(),
@@ -204,9 +286,7 @@ mod tests {
         let plan_event = HarnessServerEvent::PlanUpdate {
             session_id: "sess-123".to_string(),
             active: true,
-            plan_markdown: "1. Step 1
-2. Step 2"
-                .to_string(),
+            plan_markdown: "1. Step 1\n2. Step 2".to_string(),
         };
         let json = serde_json::to_string(&plan_event).unwrap();
         let parsed: HarnessServerEvent = serde_json::from_str(&json).unwrap();
@@ -222,5 +302,33 @@ mod tests {
         let json = serde_json::to_string(&q_event).unwrap();
         let parsed: HarnessServerEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(q_event, parsed);
+
+        let goal_event = HarnessServerEvent::GoalUpdate {
+            session_id: "sess-123".into(),
+            goal: Some(GoalItem {
+                id: "g-1".into(),
+                objective: "Ship product".into(),
+                phase: GoalPhase::Active,
+                error: None,
+            }),
+        };
+        let json = serde_json::to_string(&goal_event).unwrap();
+        let parsed: HarnessServerEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(goal_event, parsed);
+
+        let job_event = HarnessServerEvent::JobUpdate {
+            session_id: "sess-123".into(),
+            job: JobItem {
+                id: "j-1".into(),
+                kind: "agent".into(),
+                label: "worker-subtask".into(),
+                status: JobStatus::Running,
+                started_at: Utc::now(),
+                duration_ms: Some(1500),
+            },
+        };
+        let json2 = serde_json::to_string(&job_event).unwrap();
+        let parsed2: HarnessServerEvent = serde_json::from_str(&json2).unwrap();
+        assert_eq!(job_event, parsed2);
     }
 }

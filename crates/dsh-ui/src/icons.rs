@@ -280,3 +280,48 @@ pub fn document(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
         .w(px(size))
         .h(px(size))
 }
+
+/// Target / Bullseye glyph (Goal indicator).
+pub fn target(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("target.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
+
+/// Paperclip glyph (file/image attachment).
+pub fn paperclip(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("paperclip.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
+
+/// Download / export glyph (session log export).
+pub fn download(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("download.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
+
+/// Play glyph (resume goal/task).
+pub fn play(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("play.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
+
+/// Pause glyph (pause goal/task).
+pub fn pause(size: f32, color: impl Into<Hsla>) -> impl IntoElement {
+    svg()
+        .external_path(asset("pause.svg"))
+        .text_color(color)
+        .w(px(size))
+        .h(px(size))
+}
