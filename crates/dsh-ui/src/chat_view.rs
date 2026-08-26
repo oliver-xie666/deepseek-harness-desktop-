@@ -53,6 +53,10 @@ pub struct ChatView {
     pub active_input_tokens: usize,
     pub active_output_tokens: usize,
     pub active_cache_hit: Option<u8>,
+    pub plan_active: bool,
+    pub plan_markdown: String,
+    pub pending_question: Option<dsh_protocol::QuestionItem>,
+    pub selected_question_options: Vec<String>,
     pub streaming_text: String,
     pub permission_open: bool,
     pub model_open: bool,
@@ -180,6 +184,10 @@ impl ChatView {
             active_input_tokens: 0,
             active_output_tokens: 0,
             active_cache_hit: None,
+            plan_active: false,
+            plan_markdown: String::new(),
+            pending_question: None,
+            selected_question_options: Vec::new(),
             streaming_text: String::new(),
             permission_open: false,
             model_open: false,
@@ -429,6 +437,17 @@ impl ChatView {
                         .unwrap_or_default();
                     view.streaming_text = text;
                     view.trace_entries = trace_entries;
+                    view.plan_active = session
+                        .plan_state
+                        .as_ref()
+                        .map(|p| p.active)
+                        .unwrap_or(false);
+                    view.plan_markdown = session
+                        .plan_state
+                        .as_ref()
+                        .map(|p| p.plan_markdown.clone())
+                        .unwrap_or_default();
+                    view.pending_question = session.pending_question.clone();
                     view.session_log_lines = session.terminal_logs.clone();
                     view.session_log_scroll_handle.scroll_to_bottom();
                     view.conversation_messages = session.messages.clone();
@@ -450,6 +469,61 @@ impl ChatView {
         .detach();
 
         view
+    }
+
+    pub fn exit_plan_mode(&mut self, cx: &mut Context<Self>) {
+        if let Some(session_id) = self.active_session_id.clone() {
+            let state = self.state.read(cx).clone();
+            self.plan_active = false;
+            tokio::spawn(async move {
+                let _ = state.toggle_plan_mode(&session_id, false).await;
+            });
+            cx.notify();
+        }
+    }
+
+    pub fn approve_plan(&mut self, cx: &mut Context<Self>) {
+        if let Some(session_id) = self.active_session_id.clone() {
+            let state = self.state.read(cx).clone();
+            self.plan_markdown.clear();
+            tokio::spawn(async move {
+                let _ = state.toggle_plan_mode(&session_id, false).await;
+            });
+            cx.notify();
+        }
+    }
+
+    pub fn toggle_question_option(&mut self, option: &str, multi: bool, cx: &mut Context<Self>) {
+        if multi {
+            if let Some(pos) = self
+                .selected_question_options
+                .iter()
+                .position(|o| o == option)
+            {
+                self.selected_question_options.remove(pos);
+            } else {
+                self.selected_question_options.push(option.to_string());
+            }
+        } else {
+            self.selected_question_options = vec![option.to_string()];
+        }
+        cx.notify();
+    }
+
+    pub fn submit_question_answer(&mut self, question_id: &str, cx: &mut Context<Self>) {
+        let selected = self.selected_question_options.clone();
+        if let Some(session_id) = self.active_session_id.clone() {
+            let state = self.state.read(cx).clone();
+            let q_id = question_id.to_string();
+            tokio::spawn(async move {
+                let _ = state
+                    .answer_question(&session_id, &q_id, selected, None)
+                    .await;
+            });
+            self.selected_question_options.clear();
+            self.pending_question = None;
+            cx.notify();
+        }
     }
 
     pub fn reset(&mut self, cx: &mut Context<Self>) {
@@ -829,7 +903,10 @@ impl ChatView {
                                             .items_center()
                                             .gap_2()
                                             .child(self.render_plus_button(cx))
-                                            .child(self.render_access_selector(cx)),
+                                            .child(self.render_access_selector(cx))
+                                            .when(self.plan_active, |this| {
+                                                this.child(self.render_plan_chip(cx))
+                                            }),
                                     )
                                     .child(
                                         div()
@@ -1014,6 +1091,29 @@ impl ChatView {
             )
     }
 
+    fn render_plan_chip(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let handle_exit = cx.listener(|this, _, _, cx| this.exit_plan_mode(cx));
+        div()
+            .flex()
+            .items_center()
+            .gap_1()
+            .px_2()
+            .py_0p5()
+            .rounded_full()
+            .bg(rgb(0xfef3c7))
+            .border_1()
+            .border_color(rgb(0xfde68a))
+            .cursor_pointer()
+            .on_mouse_down(gpui::MouseButton::Left, handle_exit)
+            .child(
+                div()
+                    .text_xs()
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(rgb(0xb45309))
+                    .child("Plan"),
+            )
+            .child(icons::close(10.0, rgb(0xb45309)))
+    }
     fn render_access_selector(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let current = self.permission_mode.clone();
         let is_open = self.permission_open;
@@ -1441,6 +1541,152 @@ impl ChatView {
             )
     }
 
+    fn render_plan_review_card(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let handle_approve = cx.listener(|this, _, _, cx| this.approve_plan(cx));
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_3p5()
+            .rounded_xl()
+            .bg(rgb(0xfffbeb))
+            .border_1()
+            .border_color(rgb(0xfde68a))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(div().size(px(8.0)).rounded_full().bg(rgb(0xd97706)))
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(rgb(0xb45309))
+                            .child("Plan 审核"),
+                    ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(rgb(0x78350f))
+                    .child(self.plan_markdown.clone()),
+            )
+            .child(
+                div().flex().items_center().justify_end().gap_2().child(
+                    div()
+                        .px_2p5()
+                        .py_1()
+                        .rounded_md()
+                        .bg(rgb(0xd97706))
+                        .hover(|s| s.bg(rgb(0xb45309)))
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(rgb(0xffffff))
+                        .cursor_pointer()
+                        .on_mouse_down(gpui::MouseButton::Left, handle_approve)
+                        .child("批准计划"),
+                ),
+            )
+    }
+
+    fn render_question_card(
+        &self,
+        q: &dsh_protocol::QuestionItem,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let q_id = q.id.clone();
+        let multi = q.multi_select;
+        let handle_submit = cx.listener({
+            let q_id = q_id.clone();
+            move |this, _, _, cx| this.submit_question_answer(&q_id, cx)
+        });
+
+        div()
+            .flex()
+            .flex_col()
+            .gap_2p5()
+            .p_3p5()
+            .rounded_xl()
+            .bg(rgb(0xf0f9ff))
+            .border_1()
+            .border_color(rgb(0xbae6fd))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(div().size(px(8.0)).rounded_full().bg(rgb(0x0284c7)))
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(rgb(0x0369a1))
+                            .child("请选择方案"),
+                    ),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(rgb(0x0f172a))
+                    .child(q.prompt.clone()),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_2()
+                    .children(q.options.iter().map(|opt| {
+                        let opt_str = opt.clone();
+                        let is_selected = self.selected_question_options.contains(&opt_str);
+                        let handle_toggle = cx.listener({
+                            let opt_str = opt_str.clone();
+                            move |this, _, _, cx| this.toggle_question_option(&opt_str, multi, cx)
+                        });
+                        div()
+                            .px_2p5()
+                            .py_1()
+                            .rounded_lg()
+                            .border_1()
+                            .border_color(if is_selected {
+                                rgb(0x0284c7)
+                            } else {
+                                rgb(0xe2e8f0)
+                            })
+                            .bg(if is_selected {
+                                rgb(0xe0f2fe)
+                            } else {
+                                rgb(0xffffff)
+                            })
+                            .text_xs()
+                            .text_color(if is_selected {
+                                rgb(0x0369a1)
+                            } else {
+                                rgb(0x334155)
+                            })
+                            .cursor_pointer()
+                            .on_mouse_down(gpui::MouseButton::Left, handle_toggle)
+                            .child(opt.clone())
+                    })),
+            )
+            .child(
+                div().flex().justify_end().pt_1().child(
+                    div()
+                        .px_3()
+                        .py_1()
+                        .rounded_md()
+                        .bg(rgb(0x0284c7))
+                        .hover(|s| s.bg(rgb(0x0369a1)))
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(rgb(0xffffff))
+                        .cursor_pointer()
+                        .on_mouse_down(gpui::MouseButton::Left, handle_submit)
+                        .child("确认选择"),
+                ),
+            )
+    }
     fn render_active_messages(&self, cx: &mut Context<Self>) -> impl IntoElement {
         if self.active_view == SessionView::Trace {
             return div()
@@ -1720,6 +1966,16 @@ impl ChatView {
                             .max_w_full()
                             .p_4()
                             .children(message_rows)
+                            .when(!self.plan_markdown.is_empty(), |this| {
+                                this.child(self.render_plan_review_card(cx))
+                            })
+                            .when_some(self.pending_question.as_ref(), |this, q| {
+                                if q.answered.is_none() {
+                                    this.child(self.render_question_card(q, cx))
+                                } else {
+                                    this
+                                }
+                            })
                             .when_some(self.diff_notice.as_ref(), |this, notice| {
                                 this.child(
                                     div()
@@ -1958,5 +2214,54 @@ pub mod stats_tests {
             line,
             "1 轮 · 3 步 | LLM 1.5s · 工具调用 450ms | 首 token 平均 320ms · 50.0 token/s | 缓存命中 95% | 输入 1.2k · 输出 450"
         );
+    }
+}
+
+#[cfg(test)]
+mod plan_and_question_tests {
+    #[test]
+    fn test_question_option_single_select_toggle() {
+        let mut selected = Vec::new();
+        let toggle = |sel: &mut Vec<String>, opt: &str, multi: bool| {
+            if multi {
+                if let Some(pos) = sel.iter().position(|o| o == opt) {
+                    sel.remove(pos);
+                } else {
+                    sel.push(opt.to_string());
+                }
+            } else {
+                *sel = vec![opt.to_string()];
+            }
+        };
+
+        toggle(&mut selected, "Option 1", false);
+        assert_eq!(selected, vec!["Option 1".to_string()]);
+        toggle(&mut selected, "Option 2", false);
+        assert_eq!(selected, vec!["Option 2".to_string()]);
+    }
+
+    #[test]
+    fn test_question_option_multi_select_toggle() {
+        let mut selected = Vec::new();
+        let toggle = |sel: &mut Vec<String>, opt: &str, multi: bool| {
+            if multi {
+                if let Some(pos) = sel.iter().position(|o| o == opt) {
+                    sel.remove(pos);
+                } else {
+                    sel.push(opt.to_string());
+                }
+            } else {
+                *sel = vec![opt.to_string()];
+            }
+        };
+
+        toggle(&mut selected, "Option A", true);
+        toggle(&mut selected, "Option B", true);
+        assert_eq!(
+            selected,
+            vec!["Option A".to_string(), "Option B".to_string()]
+        );
+        toggle(&mut selected, "Option A", true);
+        assert_eq!(selected, vec!["Option B".to_string()]);
     }
 }

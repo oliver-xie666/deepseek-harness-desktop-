@@ -78,6 +78,8 @@ mod tests {
             diffs: std::collections::HashMap::new(),
             terminal_logs: vec!["Log 1".into()],
             agent_state: None,
+            plan_state: None,
+            pending_question: None,
         };
 
         SessionPersistence::save_session(&temp_dir, &session).unwrap();
@@ -102,6 +104,8 @@ mod tests {
             diffs: std::collections::HashMap::new(),
             terminal_logs: Vec::new(),
             agent_state: None,
+            plan_state: None,
+            pending_question: None,
         };
 
         SessionPersistence::save_session(&temp_dir, &make_session("one")).unwrap();

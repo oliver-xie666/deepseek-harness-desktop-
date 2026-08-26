@@ -8,7 +8,9 @@ pub mod ws_client;
 use chrono::{DateTime, Utc};
 use dsh_common::{AppPaths, Result};
 use dsh_daemon::{DaemonConfig, DaemonManager};
-use dsh_protocol::{AgentState, HarnessClientMessage, HarnessServerEvent, ToolStatus};
+use dsh_protocol::{
+    AgentState, HarnessClientMessage, HarnessServerEvent, PlanState, QuestionItem, ToolStatus,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -70,6 +72,10 @@ pub struct Session {
     pub diffs: HashMap<String, FileDiffItem>,
     pub terminal_logs: Vec<String>,
     pub agent_state: Option<AgentState>,
+    #[serde(default)]
+    pub plan_state: Option<PlanState>,
+    #[serde(default)]
+    pub pending_question: Option<QuestionItem>,
 }
 
 fn default_session_time() -> DateTime<Utc> {
@@ -138,6 +144,8 @@ impl AppState {
             diffs: HashMap::new(),
             terminal_logs: Vec::new(),
             agent_state: Some(AgentState::Idle),
+            plan_state: None,
+            pending_question: None,
         };
 
         self.sessions
@@ -234,6 +242,54 @@ impl AppState {
 
     pub async fn set_workspace_path(&self, workspace_path: PathBuf) {
         *self.workspace_path.write().await = workspace_path;
+    }
+
+    pub async fn toggle_plan_mode(&self, session_id: &str, enabled: bool) -> Result<()> {
+        if let Some(session) = self.sessions.write().await.get_mut(session_id) {
+            let current = session.plan_state.clone().unwrap_or_default();
+            session.plan_state = Some(PlanState {
+                active: enabled,
+                plan_markdown: current.plan_markdown,
+            });
+            session.updated_at = Utc::now();
+            let _ = SessionPersistence::save_session(&self.storage_dir, session);
+        }
+        let _ = self
+            .outbox_tx
+            .send(HarnessClientMessage::TogglePlanMode {
+                session_id: session_id.to_string(),
+                enabled,
+            })
+            .await;
+        Ok(())
+    }
+
+    pub async fn answer_question(
+        &self,
+        session_id: &str,
+        question_id: &str,
+        selected: Vec<String>,
+        custom_text: Option<String>,
+    ) -> Result<()> {
+        if let Some(session) = self.sessions.write().await.get_mut(session_id) {
+            if let Some(q) = &mut session.pending_question {
+                if q.id == question_id {
+                    q.answered = Some(selected.clone());
+                }
+            }
+            session.updated_at = Utc::now();
+            let _ = SessionPersistence::save_session(&self.storage_dir, session);
+        }
+        let _ = self
+            .outbox_tx
+            .send(HarnessClientMessage::AnswerQuestion {
+                session_id: session_id.to_string(),
+                question_id: question_id.to_string(),
+                selected,
+                custom_text,
+            })
+            .await;
+        Ok(())
     }
 
     pub async fn add_user_message(&self, session_id: &str, text: &str) -> Result<()> {
@@ -414,6 +470,43 @@ impl AppState {
                     None
                 }
             }
+            HarnessServerEvent::PlanUpdate {
+                session_id,
+                active,
+                plan_markdown,
+            } => {
+                if let Some(session) = self.sessions.write().await.get_mut(&session_id) {
+                    session.plan_state = Some(PlanState {
+                        active,
+                        plan_markdown,
+                    });
+                    session.updated_at = Utc::now();
+                    Some(session.clone())
+                } else {
+                    None
+                }
+            }
+            HarnessServerEvent::QuestionPrompt {
+                session_id,
+                question_id,
+                prompt,
+                options,
+                multi_select,
+            } => {
+                if let Some(session) = self.sessions.write().await.get_mut(&session_id) {
+                    session.pending_question = Some(QuestionItem {
+                        id: question_id,
+                        prompt,
+                        options,
+                        multi_select,
+                        answered: None,
+                    });
+                    session.updated_at = Utc::now();
+                    Some(session.clone())
+                } else {
+                    None
+                }
+            }
             HarnessServerEvent::AgentStateChange { session_id, state } => {
                 if let Some(session) = self.sessions.write().await.get_mut(&session_id) {
                     session.agent_state = Some(state);
@@ -499,5 +592,77 @@ mod tests {
             *state.workspace_path.read().await,
             std::path::PathBuf::from("/tmp/workspace")
         );
+    }
+    #[tokio::test]
+    async fn test_plan_and_question_events() {
+        let temp_dir = std::env::temp_dir().join(format!("dsh_test_plan_{}", uuid::Uuid::new_v4()));
+        let (state, mut outbox_rx) =
+            AppState::new_with_storage(DaemonConfig::default(), temp_dir.clone());
+        let session_id = state.create_session("Plan Session", "/tmp").await;
+
+        state
+            .handle_server_event(HarnessServerEvent::PlanUpdate {
+                session_id: session_id.clone(),
+                active: true,
+                plan_markdown: "1. Step 1
+2. Step 2"
+                    .into(),
+            })
+            .await;
+
+        let sessions = state.sessions.read().await;
+        let session = sessions.get(&session_id).unwrap();
+        assert!(session.plan_state.as_ref().unwrap().active);
+        assert_eq!(
+            session.plan_state.as_ref().unwrap().plan_markdown,
+            "1. Step 1
+2. Step 2"
+        );
+        drop(sessions);
+
+        state.toggle_plan_mode(&session_id, false).await.unwrap();
+        let msg = outbox_rx.try_recv().unwrap();
+        assert_eq!(
+            msg,
+            HarnessClientMessage::TogglePlanMode {
+                session_id: session_id.clone(),
+                enabled: false,
+            }
+        );
+
+        state
+            .handle_server_event(HarnessServerEvent::QuestionPrompt {
+                session_id: session_id.clone(),
+                question_id: "q-1".into(),
+                prompt: "Select mode".into(),
+                options: vec!["Mode A".into(), "Mode B".into()],
+                multi_select: false,
+            })
+            .await;
+
+        let sessions = state.sessions.read().await;
+        let session = sessions.get(&session_id).unwrap();
+        assert_eq!(
+            session.pending_question.as_ref().unwrap().prompt,
+            "Select mode"
+        );
+        drop(sessions);
+
+        state
+            .answer_question(&session_id, "q-1", vec!["Mode A".into()], None)
+            .await
+            .unwrap();
+        let msg2 = outbox_rx.try_recv().unwrap();
+        assert_eq!(
+            msg2,
+            HarnessClientMessage::AnswerQuestion {
+                session_id: session_id.clone(),
+                question_id: "q-1".into(),
+                selected: vec!["Mode A".into()],
+                custom_text: None,
+            }
+        );
+
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 }
