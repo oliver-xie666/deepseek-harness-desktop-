@@ -202,6 +202,9 @@ fn copy_button(
     handler: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut gpui::App) + 'static,
 ) -> impl IntoElement {
     div()
+        .flex()
+        .items_center()
+        .gap_1()
         .px_2()
         .py_1()
         .rounded_md()
@@ -210,6 +213,7 @@ fn copy_button(
         .hover(|style| style.bg(rgb(0xf1f3f5)).text_color(rgb(0x0f1115)))
         .cursor_pointer()
         .on_mouse_down(gpui::MouseButton::Left, handler)
+        .child(icons::copy(12.0, rgb(0x61666b)))
         .child("复制")
 }
 

@@ -36,6 +36,11 @@ impl AppPaths {
     }
 
     pub fn data_dir() -> PathBuf {
+        if let Ok(dir) = std::env::var("DSH_DATA_DIR") {
+            if !dir.trim().is_empty() {
+                return PathBuf::from(dir.trim());
+            }
+        }
         Self::get_project_dirs()
             .map(|dirs| dirs.data_dir().to_path_buf())
             .unwrap_or_else(|| PathBuf::from("./.dsh_data"))

@@ -10,6 +10,7 @@ name = "dsh-desktop"
 path = "src/main.rs"
 
 [dependencies]
+chrono.workspace = true
 dsh-common.workspace = true
 dsh-protocol.workspace = true
 dsh-daemon.workspace = true
