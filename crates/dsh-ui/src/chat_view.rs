@@ -11,7 +11,7 @@ use dsh_markdown::{
 use dsh_protocol::ToolStatus;
 use gpui::{
     deferred, div, prelude::*, px, rgb, rgba, Context, Entity, FontWeight, IntoElement,
-    ScrollHandle, Subscription, Window,
+    MouseButton, ScrollHandle, Subscription, Window,
 };
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -575,7 +575,11 @@ impl ChatView {
         cx.notify();
     }
 
-    fn render_markdown_block(&self, block: MarkdownBlock) -> impl IntoElement {
+    fn render_markdown_block(
+        &self,
+        block: MarkdownBlock,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         match block {
             MarkdownBlock::Heading { level, inlines } => {
                 let text: String = inlines
@@ -631,6 +635,10 @@ impl ChatView {
                 })),
             MarkdownBlock::CodeBlock { language, code } => {
                 let spans = CodeHighlighter::highlight(&code, &language);
+                let code_content = code.clone();
+                let handle_copy_code = cx.listener(move |_this, _, _, cx| {
+                    cx.write_to_clipboard(code_content.clone().into());
+                });
 
                 div()
                     .my_2()
@@ -653,9 +661,17 @@ impl ChatView {
                             .child(language)
                             .child(
                                 div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .px_1p5()
+                                    .py_0p5()
+                                    .rounded(px(4.0))
+                                    .hover(|s| s.bg(rgb(0xe5e7eb)))
                                     .cursor_pointer()
-                                    .hover(|s| s.text_color(rgb(0x0f1115)))
-                                    .child("复制"),
+                                    .on_mouse_down(MouseButton::Left, handle_copy_code)
+                                    .child(icons::copy(12.0, rgb(0x61666b)))
+                                    .child(div().text_xs().text_color(rgb(0x61666b)).child("复制")),
                             ),
                     )
                     .child(
@@ -1501,8 +1517,64 @@ impl ChatView {
                         .children(
                             StreamingMarkdownParser::parse_markdown(&message.content)
                                 .into_iter()
-                                .map(|block| self.render_markdown_block(block)),
+                                .map(|block| self.render_markdown_block(block, cx)),
                         )
+                        .child({
+                            let message_content = message.content.clone();
+                            let handle_copy_msg = cx.listener(move |_this, _, _, cx| {
+                                cx.write_to_clipboard(message_content.clone().into());
+                            });
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .pt_2()
+                                .child(
+                                    div()
+                                        .size(px(24.0))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .rounded(px(6.0))
+                                        .hover(|s| s.bg(rgb(0xf1f3f5)))
+                                        .cursor_pointer()
+                                        .on_mouse_down(gpui::MouseButton::Left, handle_copy_msg)
+                                        .child(icons::copy(13.0, rgb(0x81858c))),
+                                )
+                                .child(
+                                    div()
+                                        .size(px(24.0))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .rounded(px(6.0))
+                                        .hover(|s| s.bg(rgb(0xf1f3f5)))
+                                        .cursor_pointer()
+                                        .child(icons::thumbs_up(13.0, rgb(0x81858c))),
+                                )
+                                .child(
+                                    div()
+                                        .size(px(24.0))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .rounded(px(6.0))
+                                        .hover(|s| s.bg(rgb(0xf1f3f5)))
+                                        .cursor_pointer()
+                                        .child(icons::thumbs_down(13.0, rgb(0x81858c))),
+                                )
+                                .child(
+                                    div()
+                                        .size(px(24.0))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .rounded(px(6.0))
+                                        .hover(|s| s.bg(rgb(0xf1f3f5)))
+                                        .cursor_pointer()
+                                        .child(icons::retry(13.0, rgb(0x81858c))),
+                                )
+                        })
                         .into_any_element(),
                     dsh_core::MessageSender::System => div()
                         .p_3()
