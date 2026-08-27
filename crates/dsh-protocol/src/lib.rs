@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+﻿use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -59,6 +59,12 @@ pub enum HarnessServerEvent {
     },
     /// Incremental token chunk from LLM
     TokenChunk {
+        session_id: String,
+        message_id: String,
+        text: String,
+    },
+    /// Incremental reasoning/thinking token chunk from DeepSeek-R1
+    ReasoningChunk {
         session_id: String,
         message_id: String,
         text: String,

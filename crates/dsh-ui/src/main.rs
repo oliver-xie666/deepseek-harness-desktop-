@@ -37,6 +37,10 @@ struct CliArgs {
     #[arg(long)]
     mock: bool,
 
+    /// Connect to remote daemon via WebSocket instead of standalone engine
+    #[arg(long)]
+    remote: bool,
+
     /// Default model name
     #[arg(short, long)]
     model: Option<String>,
@@ -53,6 +57,16 @@ mod tests {
             CliArgs::try_parse_from(["dsh-desktop", "--mock"])
                 .unwrap()
                 .mock
+        );
+    }
+
+    #[test]
+    fn test_standalone_mode_flag() {
+        assert!(!CliArgs::try_parse_from(["dsh-desktop"]).unwrap().remote);
+        assert!(
+            CliArgs::try_parse_from(["dsh-desktop", "--remote"])
+                .unwrap()
+                .remote
         );
     }
 }
@@ -75,12 +89,12 @@ fn main() {
     }
 
     info!(
-        "Starting DeepSeek Harness 100% Pure Rust + GPUI Desktop (workspace: {}, mock: {})...",
+        "Starting DeepSeek Harness 100% Pure Rust + GPUI Desktop (workspace: {}, standalone: {})...",
         args.workspace.display(),
-        args.mock
+        !args.remote
     );
 
-    // Dedicated background Tokio Multi-Thread Runtime for Daemon & WebSocket
+    // Dedicated background Tokio Multi-Thread Runtime for LLM & Background Tasks
     let tokio_runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -101,16 +115,20 @@ fn main() {
 
     let (app_state, outbox_rx) = AppState::new(daemon_config);
     *app_state.workspace_path.blocking_write() = args.workspace.clone();
+    *app_state.standalone_mode.blocking_write() = !args.remote;
     let state_for_runtime = app_state.clone();
 
-    // Start the daemon and its WebSocket client from the same AppState so the
-    // outbound queue and inbound event handler share one live connection.
+    // Start sessions and background engine/client
     tokio_runtime.spawn(async move {
-        if let Err(e) = state_for_runtime.daemon_manager.start().await {
-            tracing::warn!("Failed to start deepseek-harness daemon: {}", e);
-        }
         state_for_runtime.load_saved_sessions().await;
-        AppState::start_background_client(state_for_runtime, outbox_rx);
+        if args.remote {
+            if let Err(e) = state_for_runtime.daemon_manager.start().await {
+                tracing::warn!("Failed to start deepseek-harness daemon: {}", e);
+            }
+            AppState::start_background_client(state_for_runtime, outbox_rx);
+        } else {
+            tracing::info!("Running in 100% Standalone Pure Rust Direct LLM & Agent Mode");
+        }
     });
 
     // Launch GPUI 120 FPS DirectX Engine

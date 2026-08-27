@@ -1,8 +1,12 @@
+pub mod agent;
 pub mod config;
 pub mod diff_applier;
 pub mod fs_tree;
+pub mod llm;
 pub mod mcp;
 pub mod persistence;
+pub mod plugin;
+pub mod tools;
 pub mod ws_client;
 
 use chrono::{DateTime, Utc};
@@ -14,16 +18,20 @@ use dsh_protocol::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 
+pub use agent::{AgentLoopConfig, NativeAgentLoop};
 pub use config::{AppConfig, ModelConfig, ProviderType, UiConfig};
 pub use diff_applier::DiffApplier;
 pub use fs_tree::{FileNode, WorkspaceScanner};
+pub use llm::{LlmClient, LlmClientConfig};
 pub use mcp::{McpRegistry, McpServerConfig, McpTransport};
 pub use persistence::SessionPersistence;
+pub use plugin::{PluginInfo, PluginManager};
+pub use tools::{ToolExecutionResult, ToolRegistry};
 pub use ws_client::HarnessWsClient;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -31,6 +39,9 @@ pub struct ChatMessage {
     pub id: String,
     pub sender: MessageSender,
     pub content: String,
+    #[serde(default)]
+    pub reasoning: Option<String>,
+    #[serde(default)]
     pub tool_calls: Vec<ToolCallItem>,
     pub created_at: DateTime<Utc>,
 }
@@ -129,6 +140,9 @@ pub struct AppState {
     pub daemon_manager: Arc<DaemonManager>,
     pub config: RwLock<AppConfig>,
     pub mcp_servers: RwLock<Vec<McpServerConfig>>,
+    pub plugin_manager: RwLock<PluginManager>,
+    pub tool_registry: RwLock<ToolRegistry>,
+    pub standalone_mode: RwLock<bool>,
     pub outbox_tx: mpsc::Sender<HarnessClientMessage>,
 }
 
@@ -146,6 +160,11 @@ impl AppState {
         let config = AppConfig::load_or_default(&storage_dir);
         let mcp_servers = McpRegistry::load_servers(&storage_dir);
 
+        let mut plugin_manager = PluginManager::new();
+        plugin_manager.load_plugins(Path::new("."));
+        let mut tool_registry = ToolRegistry::new();
+        plugin_manager.register_tools_to(&mut tool_registry);
+
         let state = Arc::new(Self {
             workspace_path: RwLock::new(PathBuf::from(".")),
             storage_dir,
@@ -154,6 +173,9 @@ impl AppState {
             daemon_manager,
             config: RwLock::new(config),
             mcp_servers: RwLock::new(mcp_servers),
+            plugin_manager: RwLock::new(plugin_manager),
+            tool_registry: RwLock::new(tool_registry),
+            standalone_mode: RwLock::new(false),
             outbox_tx,
         });
 
@@ -333,9 +355,92 @@ impl AppState {
         Ok(())
     }
 
+    pub async fn send_user_prompt(
+        self: &Arc<Self>,
+        session_id: &str,
+        text: &str,
+        attachments: Vec<String>,
+    ) -> Result<()> {
+        self.add_user_message_with_attachments(session_id, text, attachments)
+            .await?;
+
+        if *self.standalone_mode.read().await {
+            let state = self.clone();
+            let sid = session_id.to_string();
+            tokio::spawn(async move {
+                let _ = state.run_native_agent_turn(&sid).await;
+            });
+        }
+        Ok(())
+    }
+
     pub async fn add_user_message(&self, session_id: &str, text: &str) -> Result<()> {
         self.add_user_message_with_attachments(session_id, text, Vec::new())
             .await
+    }
+
+    pub async fn run_native_agent_turn(self: Arc<Self>, session_id: &str) -> Result<()> {
+        let (workspace_path, mut session) = {
+            let ws = self.workspace_path.read().await.clone();
+            let sessions = self.sessions.read().await;
+            let sess = sessions.get(session_id).cloned().ok_or_else(|| {
+                dsh_common::DshError::Protocol(format!("Session {} not found", session_id))
+            })?;
+            (ws, sess)
+        };
+
+        let (config, llm_config) = {
+            let app_cfg = self.config.read().await;
+            let loop_cfg = AgentLoopConfig {
+                max_turns: 12,
+                model_name: app_cfg.model.model_name.clone(),
+                temperature: app_cfg.model.temperature,
+                reasoning_effort: app_cfg.model.reasoning_effort.clone(),
+            };
+            let llm_cfg = LlmClientConfig {
+                base_url: app_cfg.model.base_url.clone(),
+                api_key: app_cfg.model.api_key.clone(),
+                timeout_secs: 180,
+            };
+            (loop_cfg, llm_cfg)
+        };
+
+        let llm = Arc::new(LlmClient::new(llm_config));
+        let tools = Arc::new(self.tool_registry.read().await.clone());
+        let skills_prompt = self.plugin_manager.read().await.build_skills_prompt();
+
+        let (events_tx, mut events_rx) = mpsc::channel(100);
+        let state_for_events = self.clone();
+
+        tokio::spawn(async move {
+            while let Some(evt) = events_rx.recv().await {
+                state_for_events.handle_server_event(evt).await;
+            }
+        });
+
+        let res = NativeAgentLoop::run_turn(
+            &mut session,
+            &workspace_path,
+            llm,
+            tools,
+            config,
+            if skills_prompt.is_empty() {
+                None
+            } else {
+                Some(&skills_prompt)
+            },
+            events_tx,
+        )
+        .await;
+
+        if let Ok(()) = res {
+            if let Some(s) = self.sessions.write().await.get_mut(session_id) {
+                *s = session.clone();
+                let _ = SessionPersistence::save_session(&self.storage_dir, s);
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn add_user_message_with_attachments(
@@ -355,6 +460,7 @@ impl AppState {
             id: Uuid::new_v4().to_string(),
             sender: MessageSender::User,
             content: full_content,
+            reasoning: None,
             tool_calls: Vec::new(),
             created_at: Utc::now(),
         };
@@ -383,6 +489,7 @@ impl AppState {
             id: Uuid::new_v4().to_string(),
             sender: MessageSender::User,
             content: text.to_string(),
+            reasoning: None,
             tool_calls: Vec::new(),
             created_at: Utc::now(),
         };
@@ -598,6 +705,50 @@ impl AppState {
 
     pub async fn handle_server_event(&self, event: HarnessServerEvent) {
         let session_to_save = match event {
+            HarnessServerEvent::ReasoningChunk {
+                session_id,
+                message_id,
+                text,
+            } => {
+                if let Some(session) = self.sessions.write().await.get_mut(&session_id) {
+                    if let Some(last_msg) = session.messages.last_mut() {
+                        if last_msg.sender == MessageSender::Assistant && last_msg.id == message_id
+                        {
+                            if let Some(r) = &mut last_msg.reasoning {
+                                r.push_str(&text);
+                            } else {
+                                last_msg.reasoning = Some(text);
+                            }
+                            session.updated_at = Utc::now();
+                            Some(session.clone())
+                        } else {
+                            session.messages.push(ChatMessage {
+                                id: message_id,
+                                sender: MessageSender::Assistant,
+                                content: String::new(),
+                                reasoning: Some(text),
+                                tool_calls: Vec::new(),
+                                created_at: Utc::now(),
+                            });
+                            session.updated_at = Utc::now();
+                            Some(session.clone())
+                        }
+                    } else {
+                        session.messages.push(ChatMessage {
+                            id: message_id,
+                            sender: MessageSender::Assistant,
+                            content: String::new(),
+                            reasoning: Some(text),
+                            tool_calls: Vec::new(),
+                            created_at: Utc::now(),
+                        });
+                        session.updated_at = Utc::now();
+                        Some(session.clone())
+                    }
+                } else {
+                    None
+                }
+            }
             HarnessServerEvent::TokenChunk {
                 session_id,
                 message_id,
@@ -615,6 +766,7 @@ impl AppState {
                                 id: message_id,
                                 sender: MessageSender::Assistant,
                                 content: text,
+                                reasoning: None,
                                 tool_calls: Vec::new(),
                                 created_at: Utc::now(),
                             });
@@ -626,6 +778,7 @@ impl AppState {
                             id: message_id,
                             sender: MessageSender::Assistant,
                             content: text,
+                            reasoning: None,
                             tool_calls: Vec::new(),
                             created_at: Utc::now(),
                         });

@@ -70,6 +70,8 @@ pub struct ChatView {
     pub pending_question: Option<dsh_protocol::QuestionItem>,
     pub selected_question_options: Vec<String>,
     pub streaming_text: String,
+    pub streaming_reasoning: String,
+    pub reasoning_collapsed_ids: HashSet<String>,
     pub permission_open: bool,
     pub model_open: bool,
     pub permission_mode: String,
@@ -247,6 +249,8 @@ impl ChatView {
             pending_question: None,
             selected_question_options: Vec::new(),
             streaming_text: String::new(),
+            streaming_reasoning: String::new(),
+            reasoning_collapsed_ids: HashSet::new(),
             permission_open: false,
             model_open: false,
             permission_mode: "Full access".into(),
@@ -793,6 +797,8 @@ impl ChatView {
 
         let state_arc = self.state.read(cx).clone();
         let prompt_owned = prompt;
+        let attachments = self.attachments.clone();
+        self.attachments.clear();
 
         tokio::spawn(async move {
             let session_id = {
@@ -802,7 +808,9 @@ impl ChatView {
                     None => state_arc.create_session("新会话", ".").await,
                 }
             };
-            let _ = state_arc.add_user_message(&session_id, &prompt_owned).await;
+            let _ = state_arc
+                .send_user_prompt(&session_id, &prompt_owned, attachments)
+                .await;
         });
     }
 
@@ -893,6 +901,118 @@ impl ChatView {
             let _ = config.save(&AppPaths::data_dir());
         });
         cx.notify();
+    }
+
+    pub fn toggle_reasoning_collapse(&mut self, msg_id: &str, cx: &mut Context<Self>) {
+        if !self.reasoning_collapsed_ids.insert(msg_id.to_string()) {
+            self.reasoning_collapsed_ids.remove(msg_id);
+        }
+        cx.notify();
+    }
+
+    fn render_reasoning_card(
+        &self,
+        msg_id: &str,
+        reasoning_text: &str,
+        is_streaming: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let is_collapsed = self.reasoning_collapsed_ids.contains(msg_id);
+        let msg_id_owned = msg_id.to_string();
+        let handle_toggle = cx.listener(move |this, _, _, cx| {
+            this.toggle_reasoning_collapse(&msg_id_owned, cx);
+        });
+
+        div()
+            .w_full()
+            .mb_2()
+            .rounded_xl()
+            .bg(rgb(0xf8fafc))
+            .border_1()
+            .border_color(rgb(0xe2e8f0))
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .child(
+                div()
+                    .px_3()
+                    .py_1p5()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .bg(if is_collapsed {
+                        rgb(0xf8fafc)
+                    } else {
+                        rgb(0xf1f5f9)
+                    })
+                    .hover(|s| s.bg(rgb(0xe2e8f0)))
+                    .cursor_pointer()
+                    .on_mouse_down(gpui::MouseButton::Left, handle_toggle)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color(rgb(0x334155))
+                                    .child("🧠 思考过程 (Reasoning Process)"),
+                            )
+                            .child(
+                                div()
+                                    .px_1p5()
+                                    .py_0p5()
+                                    .rounded_md()
+                                    .bg(if is_streaming {
+                                        rgb(0xdbeafe)
+                                    } else {
+                                        rgb(0xe2e8f0)
+                                    })
+                                    .text_xs()
+                                    .text_color(if is_streaming {
+                                        rgb(0x1d4ed8)
+                                    } else {
+                                        rgb(0x64748b)
+                                    })
+                                    .child(if is_streaming {
+                                        "思考中..."
+                                    } else {
+                                        "已完成思考"
+                                    }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .text_xs()
+                            .text_color(rgb(0x64748b))
+                            .child(if is_collapsed {
+                                "展开 ▸"
+                            } else {
+                                "折叠 ▾"
+                            }),
+                    ),
+            )
+            .when(!is_collapsed, |this| {
+                this.child(
+                    div()
+                        .p_3()
+                        .text_xs()
+                        .text_color(rgb(0x475569))
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .children(
+                            StreamingMarkdownParser::parse_markdown(reasoning_text)
+                                .into_iter()
+                                .map(|block| self.render_markdown_block(block, cx)),
+                        ),
+                )
+            })
     }
 
     fn render_markdown_block(
@@ -2514,6 +2634,14 @@ impl ChatView {
                         .gap_3()
                         .max_w_full()
                         .p_4()
+                        .when_some(message.reasoning.as_ref(), |this, reasoning| {
+                            this.child(self.render_reasoning_card(
+                                &message.id,
+                                reasoning,
+                                false,
+                                cx,
+                            ))
+                        })
                         .children(message.tool_calls.iter().map(|tool| {
                             let drawer_entity = self.details_drawer.clone();
                             let title = tool.tool_name.clone();
@@ -3371,5 +3499,27 @@ mod feedback_and_trace_tests {
         assert!(matches(&entry, "status"));
         assert!(matches(&entry, "TOOL"));
         assert!(!matches(&entry, "write_file"));
+    }
+}
+
+#[cfg(test)]
+mod reasoning_panel_tests {
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_reasoning_collapse_toggle() {
+        let mut collapsed: HashSet<String> = HashSet::new();
+        let msg_id = "msg-reasoning-1".to_string();
+
+        // Initial state: not collapsed
+        assert!(!collapsed.contains(&msg_id));
+
+        // First toggle: collapse
+        collapsed.insert(msg_id.clone());
+        assert!(collapsed.contains(&msg_id));
+
+        // Second toggle: expand
+        collapsed.remove(&msg_id);
+        assert!(!collapsed.contains(&msg_id));
     }
 }

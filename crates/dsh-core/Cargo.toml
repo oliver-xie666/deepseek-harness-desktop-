@@ -1,4 +1,4 @@
-[package]
+﻿[package]
 name = "dsh-core"
 version.workspace = true
 edition.workspace = true
@@ -10,6 +10,7 @@ dsh-common.workspace = true
 dsh-protocol.workspace = true
 dsh-daemon.workspace = true
 dsh-markdown.workspace = true
+directories.workspace = true
 tokio.workspace = true
 tokio-tungstenite.workspace = true
 futures.workspace = true
@@ -20,3 +21,5 @@ anyhow.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 chrono.workspace = true
+reqwest = { version = "0.13.4", features = ["json", "stream"] }
+regex = "1.13.1"
