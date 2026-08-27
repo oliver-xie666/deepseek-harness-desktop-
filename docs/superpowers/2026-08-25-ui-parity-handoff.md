@@ -2,7 +2,8 @@
 
 **更新时间：** 2026-08-26
 
-**基线：** `main` / `origin/main` 的最新提交（`5717ec6` / `feat/deliverables-skill-card-command-menu`）
+**基线：** `main` / `origin/main` 的最新提交（`67fc5de` / `fix: resolve popup overlay clipping with deferred rendering and normalize permission casing`）
+**后续演进计划：** 参见 `docs/superpowers/plans/2026-08-27-native-llm-engine-and-plugin-system.md`（纯 Rust 原生大模型直连引擎与社区 dsh-plugin 插件加载系统）
 **工作树：** 干净；`.reasonix/` 与 `.superpowers/` 均为本机生成的忽略目录。
 
 本文件记录桌面端应用与官方 Harness（本地 3080 端口）逐项视觉与交互对照、已完成的功能项、修复差距以及后续维护规范。
