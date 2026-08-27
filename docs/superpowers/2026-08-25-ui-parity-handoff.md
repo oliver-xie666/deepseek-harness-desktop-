@@ -2,7 +2,7 @@
 
 **更新时间：** 2026-08-26
 
-**基线：** `main` / `origin/main` 的最新提交（`7e1f469` / `feat/deliverables-skill-card-command-menu`）
+**基线：** `main` / `origin/main` 的最新提交（`5717ec6` / `feat/deliverables-skill-card-command-menu`）
 **工作树：** 干净；`.reasonix/` 与 `.superpowers/` 均为本机生成的忽略目录。
 
 本文件记录桌面端应用与官方 Harness（本地 3080 端口）逐项视觉与交互对照、已完成的功能项、修复差距以及后续维护规范。
@@ -23,10 +23,12 @@
 - **生成成果物与产出文件胶囊（Deliverables / ProducedFiles）**：
   - 对齐 `@deepseek-ai/dsh-client-ui-deliverables`，自动识别工具调用（`write_file`、`apply_patch`、`edit_file` 等）生成的产出文件。
   - 在 Assistant 消息底部渲染带文档矢量图标的 `生成文件:` 胶囊列表，支持点击直接在系统默认编辑器/文件管理器中打开。
+- **子代理协同与嵌套卡片（Subagent Cards）**：
+  - 对齐 `@deepseek-ai/dsh-client-ui-subagent`，对 `spawn_agent` / `dispatch_agent` / `multi_agent_v1__spawn_agent` 工具调用赋予专属绿色高亮徽标（`🤖 子代理 [agent_type]: <status>`）、状态圆点及独立详情审计。
 - **技能调用专用卡片与视觉标识（Skill Cards）**：
   - 对齐 `@deepseek-ai/dsh-client-ui-skill`，对 `skill` / `activate_skill` 工具调用赋予专属紫色高亮徽标（`⚡ 技能: <skill_name>`）与独立执行状态胶囊。
-- **全功能斜杠快捷指令菜单（Slash Commands Menu）**：
-  - 对齐 `@deepseek-ai/dsh-client-ui-commands`，输入框 `+` 菜单全面扩展为带命令名、功能说明与高亮样式的快捷指令弹窗（支持 `/help`、`/model`、`/plan`、`/export`、`/diff`、`/clear`）。
+- **全功能斜杠指令与上下文引用菜单（Slash Commands & Context Mentions）**：
+  - 对齐 `@deepseek-ai/dsh-client-ui-commands` 与 `@deepseek-ai/dsh-client-ui-input-trigger`，输入框 `+` 菜单全面支持快捷指令分区（`/help`、`/model`、`/plan`、`/export`、`/diff`、`/clear`）与上下文引用分区（`@file:`、`@docs:`）。
 - **对话与轨迹双重视图与深度检索**：
   - 顶部“对话 / 轨迹”自由切换，轨迹视图真实展示工具调用入参、输出与执行耗时。
   - 轨迹检索输入框深度支持按工具类别（TOOL/LLM/AGENT）、工具名称、执行参数（args）与工具输出（output）全文检索与回合过滤。
@@ -44,6 +46,10 @@
 - **目标导航条（GoalBar）**：
   - 输入框上方锚定 GoalBar 目标条（Target 靶心矢量图标、阶段标签 `目标 (进行中)` / `目标 (已暂停)` / `目标 (阻塞)` / `目标 (已完成)`）。
   - 支持目标行内快速编辑、保存、取消、暂停/继续切换以及一键清除。
+- **输入框弹窗与下拉菜单顶层渲染与层级修复（Deferred Popup Overlay）**：
+  - 全面使用 GPUI `deferred(...)` 延迟绘制机制包裹权限模式选择（`render_access_selector`）、模型选择器（`render_model_selector`）、快捷指令菜单（`render_plus_menu`）与后台任务列表（`render_jobs_menu`）。
+  - 彻底解决输入框外边框与容器顶边在弹窗展开时横向穿透/切断菜单项的视觉 Bug，并为浮层配置 `bg(rgb(0xffffff))`、`border_1`、`border_color` 与 `shadow_lg`。
+  - 统一权限模式文案与大小写（`Full access` / `Workspace write` / `Read-only`），消除与设置模态框文案不一致。
 - **后台任务指示器与任务列表（JobListAction & JobListMenu）**：
   - 输入框底部工具栏渲染动态任务状态徽标（运行中绿/停止中琥珀/失败红/完成灰，以及任务计数）。
   - 点击展开任务详情菜单，展示任务类型标签、Monospace 标识、状态、耗时以及运行中任务的终止控制。

@@ -289,8 +289,8 @@ impl ChatView {
                     .unwrap_or("工作区")
                     .to_string();
                 let permission_mode = match config.ui.permission_mode.as_str() {
-                    "read-only" => "Read Only",
-                    "workspace-write" => "Workspace Write",
+                    "read-only" | "Read-only" | "Read Only" => "Read-only",
+                    "workspace-write" | "Workspace write" | "Workspace Write" => "Workspace write",
                     _ => "Full access",
                 }
                 .to_string();
@@ -837,8 +837,8 @@ impl ChatView {
         self.permission_mode = value.to_string();
         self.permission_open = false;
         let config_value = match value {
-            "Read Only" => "read-only",
-            "Workspace Write" => "workspace-write",
+            "Read-only" | "Read Only" | "read-only" => "read-only",
+            "Workspace write" | "Workspace Write" | "workspace-write" => "workspace-write",
             _ => "full-access",
         };
         let state = self.state.read(cx).clone();
@@ -1634,7 +1634,7 @@ impl ChatView {
                     .child(icons::chevron_down(12.0, rgb(0x81858c))),
             )
             .when(is_open, |this| {
-                this.child(
+                this.child(deferred(
                     div()
                         .absolute()
                         .bottom(px(34.0))
@@ -1751,7 +1751,7 @@ impl ChatView {
                                         }),
                                 )
                         })),
-                )
+                ))
             })
             .into_any_element()
     }
@@ -1834,8 +1834,8 @@ impl ChatView {
         let handle_toggle = cx.listener(|this, _, _, cx| this.toggle_permission(cx));
         let handle_full = cx.listener(|this, _, _, cx| this.set_permission("Full access", cx));
         let handle_workspace =
-            cx.listener(|this, _, _, cx| this.set_permission("Workspace Write", cx));
-        let handle_read = cx.listener(|this, _, _, cx| this.set_permission("Read Only", cx));
+            cx.listener(|this, _, _, cx| this.set_permission("Workspace write", cx));
+        let handle_read = cx.listener(|this, _, _, cx| this.set_permission("Read-only", cx));
 
         div()
             .relative()
@@ -1855,7 +1855,7 @@ impl ChatView {
                     .child(icons::chevron_down(12.0, rgb(0x81858c))),
             )
             .when(is_open, |this| {
-                this.child(
+                this.child(deferred(
                     div()
                         .absolute()
                         .bottom(px(34.0))
@@ -1877,19 +1877,19 @@ impl ChatView {
                             )
                             .into_any_element(),
                             menu_choice(
-                                "Workspace Write",
-                                self.permission_mode == "Workspace Write",
+                                "Workspace write",
+                                self.permission_mode == "Workspace write",
                                 handle_workspace,
                             )
                             .into_any_element(),
                             menu_choice(
-                                "Read Only",
-                                self.permission_mode == "Read Only",
+                                "Read-only",
+                                self.permission_mode == "Read-only",
                                 handle_read,
                             )
                             .into_any_element(),
                         ]),
-                )
+                ))
             })
     }
 
@@ -1900,11 +1900,14 @@ impl ChatView {
         let handle_export = cx.listener(|this, _, _, cx| this.insert_command("/export", cx));
         let handle_diff = cx.listener(|this, _, _, cx| this.insert_command("/diff", cx));
         let handle_clear = cx.listener(|this, _, _, cx| this.insert_command("/clear", cx));
+        let handle_file_ref = cx.listener(|this, _, _, cx| this.insert_command("@file:", cx));
+        let handle_docs_ref = cx.listener(|this, _, _, cx| this.insert_command("@docs:", cx));
+
         div()
             .absolute()
             .bottom(px(36.0))
             .left(px(0.0))
-            .w(px(220.0))
+            .w(px(230.0))
             .p_1()
             .rounded_xl()
             .bg(rgb(0xffffff))
@@ -1914,6 +1917,15 @@ impl ChatView {
             .flex()
             .flex_col()
             .gap_0p5()
+            .child(
+                div()
+                    .px_2()
+                    .py_1()
+                    .text_xs()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(rgb(0x9ca3af))
+                    .child("快捷指令 (Commands)"),
+            )
             .child(command_menu_item(
                 "/help",
                 "查看帮助文档与快捷指令",
@@ -1943,6 +1955,29 @@ impl ChatView {
                 "/clear",
                 "清空当前会话内容",
                 handle_clear,
+            ))
+            .child(
+                div()
+                    .mt_1()
+                    .pt_1()
+                    .border_t_1()
+                    .border_color(rgb(0xf1f3f5))
+                    .px_2()
+                    .py_0p5()
+                    .text_xs()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(rgb(0x9ca3af))
+                    .child("上下文引用 (Mentions)"),
+            )
+            .child(command_menu_item(
+                "@file:",
+                "引用工作区代码或配置文件",
+                handle_file_ref,
+            ))
+            .child(command_menu_item(
+                "@docs:",
+                "引用技术文档与知识图谱",
+                handle_docs_ref,
             ))
     }
 
@@ -1996,7 +2031,7 @@ impl ChatView {
                     .child(icons::chevron_down(12.0, rgb(0x81858c))),
             )
             .when(is_open, |this| {
-                this.child(
+                this.child(deferred(
                     div()
                         .absolute()
                         .bottom(px(34.0))
@@ -2039,7 +2074,7 @@ impl ChatView {
                                 }))
                                 .into_any_element()
                         })),
-                )
+                ))
             })
     }
 
@@ -2492,9 +2527,21 @@ impl ChatView {
                             let status = tool.status;
                             let status_label = tool_status_label(status);
                             let status_color = tool_status_color(status);
+                            let is_subagent = tool.tool_name.contains("spawn_agent")
+                                || tool.tool_name.contains("dispatch_agent")
+                                || tool.tool_name.contains("subagent");
                             let is_skill =
                                 tool.tool_name == "skill" || tool.tool_name == "activate_skill";
-                            let display_label = if is_skill {
+                            let display_label = if is_subagent {
+                                let agent_role = tool
+                                    .input
+                                    .get("agent_type")
+                                    .or_else(|| tool.input.get("role"))
+                                    .or_else(|| tool.input.get("name"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("worker");
+                                format!("🤖 子代理 [{}]: {}", agent_role, status_label)
+                            } else if is_skill {
                                 let skill_name = tool
                                     .input
                                     .get("name")
@@ -2518,13 +2565,17 @@ impl ChatView {
                                 .px_3()
                                 .py_1p5()
                                 .rounded_md()
-                                .bg(if is_skill {
+                                .bg(if is_subagent {
+                                    rgb(0xf0fdf4)
+                                } else if is_skill {
                                     rgb(0xf5f3ff)
                                 } else {
                                     rgb(0xf5f6f8)
                                 })
                                 .border_1()
-                                .border_color(if is_skill {
+                                .border_color(if is_subagent {
+                                    rgb(0x86efac)
+                                } else if is_skill {
                                     rgb(0xc4b5fd)
                                 } else {
                                     status_color
@@ -2532,7 +2583,9 @@ impl ChatView {
                                 .hover(|s| s.bg(rgb(0xf1f3f5)).border_color(rgb(0x3964fe)))
                                 .cursor_pointer()
                                 .on_mouse_down(gpui::MouseButton::Left, handle_tool_click)
-                                .child(if is_skill {
+                                .child(if is_subagent {
+                                    icons::agent_preset(14.0, rgb(0x16a34a)).into_any_element()
+                                } else if is_skill {
                                     icons::agent_preset(14.0, rgb(0x8b5cf6)).into_any_element()
                                 } else {
                                     icons::agent_preset(14.0, status_color).into_any_element()
@@ -2540,7 +2593,9 @@ impl ChatView {
                                 .child(
                                     div()
                                         .text_xs()
-                                        .text_color(if is_skill {
+                                        .text_color(if is_subagent {
+                                            rgb(0x15803d)
+                                        } else if is_skill {
                                             rgb(0x6b21a8)
                                         } else {
                                             rgb(0x61666b)
