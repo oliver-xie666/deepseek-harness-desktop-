@@ -150,6 +150,31 @@ cargo run -p dsh-ui -- --mock-daemon
 
 ---
 
+## ⚙️ Interactive Settings & 1:1 UI Parity
+
+The desktop settings interface achieves full 1:1 visual and interactive parity with the official Web UI (`localhost:3080`):
+
+- **General (常规设置)**:
+  - Default Agent preset switcher (`standard`, `code`, `minimal`, `cordis`).
+  - Permission & Safety mode selection (`full-access`, `ask-every-time`, `read-only`).
+  - Language toggle (`zh-CN` / `en-US`) and theme customization (`light` / `dark` / `system`).
+  - Enter key behavior configuration (`Enter to send / Shift+Enter for newline` vs `Ctrl+Enter to send`).
+  - One-click button to open the local config directory (`~/.dsh/`).
+- **Models & Providers (模型与服务商)**:
+  - Multi-provider support: DeepSeek official direct stream, OpenAI, Anthropic, MiniMax, Moonshot/Kimi, Qwen, Ollama, VLLM, OpenRouter, and Custom OpenAI-compatible endpoints.
+  - Interactive inputs for API Key, Base URL, Model Identifier, Temperature (0.0~2.0), and Max Tokens limit.
+  - Quick model selection chips (`deepseek-reasoner`, `deepseek-chat`, `gpt-4o`, `claude-3-5-sonnet-20241022`, `qwen-plus`, `moonshot-v1-32k`, `llama3.2`).
+  - Real-time save & apply with live floating status toast feedback.
+- **Plugins & Extensions (插件与扩展)**:
+  - **Config Tab**: Expandable configuration cards for Terminal/Shell sandbox, Agent Loop reasoning engine, Web Search, and ModLens multimodal ingestion.
+  - **Inventory Tab**: 10+ installed plugin cards with search filtering and reactive green/grey toggle switches that directly update `disabled_plugins` in `config.json`.
+- **Agent Presets & Custom Roles (智能体预设与定制)**:
+  - Builtin presets with default status badges and instant "Set as Default" actions.
+  - Interactive **Preset Copy Dialog** modal to duplicate any preset into a custom role (`custom-preset-id`, display name, description).
+  - Custom preset management with instant deletion and configuration persistence.
+- **Sidebar Cards (侧边栏卡片偏好)**:
+  - Reactive toggle switches for default sidebar expansion, automatic jobs panel popup, workspace file tree display, and terminal logs trace display.
+
 ## ⚙️ Configuration
 
 The application stores user settings at `~/.dsh/config.json`:

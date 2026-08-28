@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Official DeepSeek Harness vector glyphs, rendered through GPUI's svg()
 //! element. Each glyph is an alpha mask tinted by color (the currentColor
 //! semantics of the upstream dsh-client-ui-primitives icon set), so a single

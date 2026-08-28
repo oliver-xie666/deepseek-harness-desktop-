@@ -24,7 +24,7 @@ use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 
 pub use agent::{AgentLoopConfig, NativeAgentLoop};
-pub use config::{AppConfig, ModelConfig, ProviderType, UiConfig};
+pub use config::{AppConfig, CustomPresetConfig, ModelConfig, ProviderType, UiConfig};
 pub use diff_applier::DiffApplier;
 pub use fs_tree::{FileNode, WorkspaceScanner};
 pub use llm::{LlmClient, LlmClientConfig};

@@ -4,9 +4,14 @@ use std::fs;
 use std::path::Path;
 use tracing::info;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProviderType {
     DeepSeek,
+    OpenAI,
+    Anthropic,
+    MiniMax,
+    Moonshot,
+    Qwen,
     Ollama,
     VLLM,
     OpenRouter,
@@ -30,12 +35,19 @@ impl Default for ModelConfig {
             provider: ProviderType::DeepSeek,
             api_key: String::new(),
             base_url: "https://api.deepseek.com".to_string(),
-            model_name: "gpt-5.6-luna".to_string(),
-            temperature: 0.7,
-            max_tokens: 4096,
+            model_name: "deepseek-reasoner".to_string(),
+            temperature: 0.6,
+            max_tokens: 8192,
             reasoning_effort: "high".to_string(),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct CustomPresetConfig {
+    pub id: String,
+    pub name: String,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -53,6 +65,11 @@ pub struct UiConfig {
     pub sidebar_width_percent: u32,
     pub open_files_in_sidebar: bool,
     pub sidebar_position_compat: bool,
+    pub auto_open_jobs: bool,
+    pub show_workspace_tree: bool,
+    pub show_terminal_logs: bool,
+    pub disabled_plugins: Vec<String>,
+    pub custom_presets: Vec<CustomPresetConfig>,
 }
 
 impl Default for UiConfig {
@@ -70,6 +87,11 @@ impl Default for UiConfig {
             sidebar_width_percent: 30,
             open_files_in_sidebar: true,
             sidebar_position_compat: false,
+            auto_open_jobs: true,
+            show_workspace_tree: true,
+            show_terminal_logs: true,
+            disabled_plugins: Vec::new(),
+            custom_presets: Vec::new(),
         }
     }
 }
